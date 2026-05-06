@@ -26,15 +26,17 @@ export async function requestContextPlugin(app: FastifyInstance) {
   app.decorateRequest('ctx', null as unknown as RequestContext);
 
   app.addHook('onRequest', async (req) => {
+    const perms = (req.headers['x-actor-permissions'] as string)?.split(',').map(s => s.trim()) ?? [];
     (req as any).ctx = {
       requestId: uuid(),
       traceId: (req.headers['x-trace-id'] as string) ?? uuid(),
       tenantId: (req.headers['x-tenant-id'] as string) ?? '',
+      businessId: (req.headers['x-business-id'] as string) ?? undefined,
       actor: {
-        type: 'system',
-        id: 'anonymous',
+        type: (req.headers['x-actor-type'] as string) ?? 'system',
+        id: (req.headers['x-actor-id'] as string) ?? 'anonymous',
         roles: [],
-        permissions: [],
+        permissions: perms,
       },
     };
   });

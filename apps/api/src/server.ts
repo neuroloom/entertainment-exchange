@@ -1,7 +1,8 @@
 // Entertainment Business Exchange — Fastify API Server
 // ADR-001: Fastify-first MVP with domain boundaries preserved for Cloudflare later
 import Fastify from 'fastify';
-import { requestContextPlugin } from './plugins/requestContext.js';
+import { v4 as uuid } from 'uuid';
+import type { RequestContext } from './plugins/requestContext.js';
 import { errorHandlerPlugin } from './plugins/errorHandler.js';
 import { authRoutes } from './routes/auth.js';
 import { businessRoutes } from './routes/business.js';
@@ -11,12 +12,30 @@ import { agentRoutes } from './routes/agent.js';
 import { marketplaceRoutes } from './routes/marketplace.js';
 import { rightsRoutes } from './routes/rights.js';
 
-export function buildServer() {
+export async function buildServer() {
   const app = Fastify({ logger: true });
 
-  // Plugins
-  app.register(requestContextPlugin);
-  app.register(errorHandlerPlugin);
+  // Request context — decorator + hook directly on root so ALL children inherit
+  app.decorateRequest('ctx', null as unknown as RequestContext);
+  app.addHook('onRequest', async (req) => {
+    const perms = (req.headers['x-actor-permissions'] as string)?.split(',').map(s => s.trim()) ?? [];
+    (req as any).ctx = {
+      requestId: uuid(),
+      traceId: (req.headers['x-trace-id'] as string) ?? uuid(),
+      tenantId: (req.headers['x-tenant-id'] as string) ?? '',
+      businessId: (req.headers['x-business-id'] as string) ?? undefined,
+      actor: {
+        type: (req.headers['x-actor-type'] as any) ?? 'system',
+        id: (req.headers['x-actor-id'] as string) ?? 'anonymous',
+        userId: (req.headers['x-actor-id'] as string) ?? undefined,
+        roles: [],
+        permissions: perms,
+      },
+    };
+  });
+
+  // Error handler — directly on root so ALL children inherit
+  await errorHandlerPlugin(app);
 
   // Routes — domain boundaries preserved per service boundary spec
   app.register(authRoutes, { prefix: '/api/v1/auth' });
@@ -33,12 +52,15 @@ export function buildServer() {
   return app;
 }
 
-// Start server when run directly
-const PORT = parseInt(process.env.PORT ?? '3000', 10);
-const server = buildServer();
-server.listen({ port: PORT, host: '0.0.0.0' }, (err, addr) => {
-  if (err) { server.log.error(err); process.exit(1); }
-  server.log.info(`Entertainment Business Exchange running at ${addr}`);
-});
-
-export default server;
+// Start server only when run directly (not when imported)
+const isMain = process.argv[1]?.includes('server');
+if (isMain) {
+  (async () => {
+    const PORT = parseInt(process.env.PORT ?? '3000', 10);
+    const server = await buildServer();
+    server.listen({ port: PORT, host: '0.0.0.0' }, (err, addr) => {
+      if (err) { server.log.error(err); process.exit(1); }
+      server.log.info(`Entertainment Business Exchange running at ${addr}`);
+    });
+  })();
+}
