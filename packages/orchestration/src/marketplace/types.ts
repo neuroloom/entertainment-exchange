@@ -9,6 +9,35 @@ export type VerificationLevel =
   | 'identity_verified'
   | 'pro_seller';
 
+// Evidence tiers for deal-room readiness (L3 Marketplace)
+export type EvidenceTier =
+  | 'self_reported'
+  | 'document_supported'
+  | 'platform_verified'
+  | 'acquisition_ready';
+
+export interface EvidenceValidationResult {
+  valid: boolean;
+  missingDocuments: string[];
+  reasons: string[];
+}
+
+// Deal state machine (13 states for the acquisition lifecycle)
+export type DealState =
+  | 'created'
+  | 'offer_submitted'
+  | 'offer_accepted'
+  | 'due_diligence'
+  | 'terms_negotiated'
+  | 'terms_agreed'
+  | 'escrow_funded'
+  | 'legal_review'
+  | 'closing'
+  | 'completed'
+  | 'rejected'
+  | 'cancelled'
+  | 'expired';
+
 export type EscrowState =
   | 'initiated'
   | 'funded'
@@ -264,4 +293,30 @@ export interface AgentPurchaseTransaction {
   completed_at?: string;
   cancelled_at?: string;
   refunded_at?: string;
+}
+
+// ─── Deal Room (L3 Marketplace) ──────────────────────────────────────────────
+
+export interface DealEvent {
+  timestamp: string;
+  fromState: DealState;
+  toState: DealState;
+  action: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface DealRecord {
+  id: string;
+  listingId: number;
+  buyerId: number;
+  sellerId: number;
+  state: DealState;
+  amountCents: number;
+  counterAmountCents?: number;
+  terms?: string;
+  escrowTxHash?: string;
+  events: DealEvent[];
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
 }

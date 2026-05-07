@@ -4,6 +4,8 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
+import { assertBookingTransition, calculateQuote, BookingStateError } from '@entertainment-exchange/orchestration';
+import type { BookingState } from '@entertainment-exchange/orchestration';
 
 const CreateBookingSchema = z.object({
   eventType: z.string().min(1),
@@ -15,6 +17,10 @@ const CreateBookingSchema = z.object({
   artistId: z.string().uuid().optional(),
   venueId: z.string().uuid().optional(),
   quotedAmountCents: z.number().int().min(0).optional(),
+  durationHours: z.number().min(0).optional(),
+  guestCount: z.number().int().min(0).optional(),
+  addOns: z.array(z.string()).optional(),
+  travelMiles: z.number().min(0).optional(),
   source: z.string().optional(),
   metadata: z.record(z.unknown()).optional(),
 });
@@ -44,18 +50,35 @@ export async function bookingRoutes(app: FastifyInstance) {
     const body = CreateBookingSchema.parse(req.body);
     const bookingId = uuid();
 
+    // Compute a quote when relevant parameters are provided
+    let quote: ReturnType<typeof calculateQuote> | null = null;
+    if (
+      body.eventType &&
+      body.durationHours !== undefined &&
+      body.guestCount !== undefined
+    ) {
+      quote = calculateQuote({
+        eventType: body.eventType as any,
+        durationHours: body.durationHours,
+        guestCount: body.guestCount,
+        addOns: body.addOns ?? [],
+        travelMiles: body.travelMiles ?? 0,
+      });
+    }
+
     const booking = {
       id: bookingId, tenantId: ctx.tenantId, businessId: ctx.businessId,
       clientId: body.clientId ?? null, artistId: body.artistId ?? null, venueId: body.venueId ?? null,
       status: 'inquiry', eventType: body.eventType, eventName: body.eventName ?? null,
       eventDate: body.eventDate, startTime: body.startTime, endTime: body.endTime,
-      quotedAmountCents: body.quotedAmountCents ?? null, totalAmountCents: null, depositAmountCents: null,
+      quotedAmountCents: body.quotedAmountCents ?? quote?.totalCents ?? null,
+      totalAmountCents: null, depositAmountCents: null,
       source: body.source ?? null, metadata: body.metadata ?? {},
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
     bookings.set(bookingId, booking);
     writeAudit(ctx, 'booking.create', 'booking', bookingId, ctx.businessId);
-    reply.status(201).send({ data: booking });
+    reply.status(201).send({ data: { ...booking, quote: quote ?? undefined } });
   });
 
   app.get('/bookings', async (req, reply) => {
@@ -81,6 +104,17 @@ export async function bookingRoutes(app: FastifyInstance) {
     if (!booking || booking.tenantId !== ctx.tenantId) throw AppError.notFound('Booking');
 
     const body = PatchBookingStatusSchema.parse(req.body);
+
+    // Validate the state transition — map orchestration errors to API errors
+    try {
+      assertBookingTransition(booking.status as BookingState, body.status as BookingState, body.reason);
+    } catch (err) {
+      if (err instanceof BookingStateError) {
+        throw new AppError(err.code, err.message, err.status, err.details);
+      }
+      throw err;
+    }
+
     booking.status = body.status;
     booking.updatedAt = new Date().toISOString();
     bookings.set(booking.id, booking);

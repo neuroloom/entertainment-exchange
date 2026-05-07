@@ -15,6 +15,7 @@ export class AppError extends Error {
   static notFound(r: string) { return new AppError('NOT_FOUND', `${r} not found`, 404); }
   static invalid(msg: string) { return new AppError('INVALID_INPUT', msg, 400); }
   static tenantRequired() { return new AppError('TENANT_REQUIRED', 'X-Tenant-ID header required', 400); }
+  static unauthenticated(msg = 'Unauthenticated') { return new AppError('UNAUTHENTICATED', msg, 401); }
 }
 
 export async function errorHandlerPlugin(app: FastifyInstance) {

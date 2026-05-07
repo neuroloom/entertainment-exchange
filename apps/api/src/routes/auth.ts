@@ -3,6 +3,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
+import { createToken } from '../plugins/auth.plugin.js';
+import { AppError } from '../plugins/errorHandler.js';
 
 const RegisterSchema = z.object({
   email: z.string().email(),
@@ -53,20 +55,23 @@ export async function authRoutes(app: FastifyInstance) {
   app.post('/login', async (req, reply) => {
     const { email, password } = LoginSchema.parse(req.body);
     const user = [...users.values()].find(u => u.email === email && u.password === password);
-    if (!user) return reply.status(401).send({ error: { code: 'UNAUTHENTICATED', message: 'Invalid credentials' } });
+    if (!user) throw AppError.unauthenticated('Invalid credentials');
+
+    const permissions = ['business:create', 'business:manage'];
+    const token = await createToken(user.id, user.tenantId, permissions);
 
     (req as any).ctx = {
       requestId: uuid(), traceId: uuid(),
       tenantId: user.tenantId,
-      actor: { type: 'human', id: user.id, userId: user.id, roles: [user.role], permissions: ['business:create', 'business:manage'] },
+      actor: { type: 'human', id: user.id, userId: user.id, roles: [user.role], permissions },
     };
 
-    reply.send({ data: { userId: user.id, tenantId: user.tenantId, role: user.role } });
+    reply.send({ data: { token, userId: user.id, tenantId: user.tenantId, role: user.role } });
   });
 
   app.get('/me', async (req, reply) => {
     const ctx = (req as any).ctx;
-    if (!ctx?.actor?.userId) return reply.status(401).send({ error: { code: 'UNAUTHENTICATED', message: 'Not authenticated' } });
+    if (!ctx?.actor?.userId) throw AppError.unauthenticated('Not authenticated');
     const user = users.get(ctx.actor.userId);
     reply.send({ data: user ?? null });
   });

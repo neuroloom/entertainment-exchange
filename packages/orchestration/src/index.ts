@@ -49,6 +49,10 @@ export type {
 
 // Marketplace exports (from neuroloom/velra + neuroloom/agent-exchange)
 export { AgentMarketplace, generateAgentReplies } from './marketplace/index.js';
+// Booking domain exports
+export { BOOKING_STATES, ALLOWED_TRANSITIONS, assertBookingTransition, isTerminalState, getNextStates, BookingStateError, calculateQuote } from './booking/index.js';
+export type { BookingState, EventType, QuoteParams, QuoteBreakdown } from './booking/index.js';
+
 export type {
   VerificationLevel,
   EscrowState,
@@ -74,3 +78,42 @@ export type {
   PurchaseStatus,
   AgentPurchaseTransaction,
 } from './marketplace/index.js';
+
+// Rights module — passport chain-of-title, transferability scoring
+export { PassportVerifier, TransferabilityScorer } from './rights/index.js';
+export type {
+  PassportStatus,
+  PassportType,
+  LegalAnchor,
+  RightsAsset,
+  RightsPassport,
+  PassportChainEntry,
+  PassportChain,
+  VerificationResult,
+  IssuePassportInput,
+  PassportVerifierStores,
+  TransferabilityGrade,
+  TransferabilityScore,
+  BusinessProfile,
+} from './rights/index.js';
+
+// Ledger exports
+export {
+  IdempotencyStore,
+  idempotencyStore,
+  DEPOSIT_RECIPE,
+  RECOGNIZE_RECIPE,
+  COMMISSION_RECIPE,
+  PAYOUT_RECIPE,
+  getRecipeForEvent,
+  verifyRecipe,
+  verifyAllRecipes,
+  RevenueSchedule,
+} from './ledger/index.js';
+export type {
+  IdempotencyEntry,
+  RecipeEntry,
+  RecipeResult,
+  RevenueRecipe,
+  ScheduledRecognition,
+} from './ledger/index.js';
