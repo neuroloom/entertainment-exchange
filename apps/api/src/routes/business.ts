@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
+import { MemoryStore, AuditStore } from '../services/repo.js';
 
 const CreateBusinessSchema = z.object({
   name: z.string().min(1),
@@ -11,10 +12,10 @@ const CreateBusinessSchema = z.object({
   legalName: z.string().optional(),
 });
 
-// In-memory stores
-const businesses = new Map<string, any>();
+// In-memory stores with optional PG write-through
+const businesses = new MemoryStore('businesses');
 const ledgerAccounts = new Map<string, any[]>();
-const auditEvents: any[] = [];
+const auditEvents = new AuditStore();
 
 const DEFAULT_CHART_OF_ACCOUNTS = [
   { code: '1000', name: 'Cash / Stripe Clearing', type: 'asset' },
@@ -48,7 +49,7 @@ export async function businessRoutes(app: FastifyInstance) {
       status: 'active', currency: 'USD', timezone: 'America/New_York',
       metadata: {}, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
-    businesses.set(businessId, business);
+    businesses.set(business);
 
     // Default chart of accounts
     const accounts = DEFAULT_CHART_OF_ACCOUNTS.map(a => ({
@@ -65,7 +66,7 @@ export async function businessRoutes(app: FastifyInstance) {
   app.get('/businesses', async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
-    const all = [...businesses.values()].filter(b => b.tenantId === ctx.tenantId);
+    const all = businesses.all(ctx.tenantId);
     reply.send({ data: all });
   });
 

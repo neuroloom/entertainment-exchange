@@ -4,6 +4,12 @@ import Fastify from 'fastify';
 import { v4 as uuid } from 'uuid';
 import type { RequestContext } from './plugins/requestContext.js';
 import { errorHandlerPlugin } from './plugins/errorHandler.js';
+import { rateLimitPlugin } from './plugins/rate-limit.plugin.js';
+import { loggerPlugin } from './plugins/logger.plugin.js';
+import { metricsPlugin } from './plugins/metrics.plugin.js';
+import { healthPlugin } from './plugins/health.plugin.js';
+import { sanitizePlugin } from './plugins/sanitize.plugin.js';
+import { authPlugin } from './plugins/auth.plugin.js';
 import { authRoutes } from './routes/auth.js';
 import { businessRoutes } from './routes/business.js';
 import { bookingRoutes } from './routes/booking.js';
@@ -37,6 +43,18 @@ export async function buildServer() {
   // Error handler — directly on root so ALL children inherit
   await errorHandlerPlugin(app);
 
+  // Auth plugin — reads Authorization: Bearer and populates ctx
+  await authPlugin(app);
+
+  // Sanitize plugin — strips bidi chars, trims strings, blocks XSS in body/query
+  await sanitizePlugin(app);
+
+  // L5 PRODUCTION — Observability plugins
+  await rateLimitPlugin(app);
+  await loggerPlugin(app);
+  await metricsPlugin(app);
+  await healthPlugin(app);
+
   // Routes — domain boundaries preserved per service boundary spec
   app.register(authRoutes, { prefix: '/api/v1/auth' });
   app.register(businessRoutes, { prefix: '/api/v1' });
@@ -45,9 +63,6 @@ export async function buildServer() {
   app.register(agentRoutes, { prefix: '/api/v1/agents' });
   app.register(marketplaceRoutes, { prefix: '/api/v1/marketplace' });
   app.register(rightsRoutes, { prefix: '/api/v1/rights' });
-
-  // Health check
-  app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
 
   return app;
 }
@@ -58,9 +73,36 @@ if (isMain) {
   (async () => {
     const PORT = parseInt(process.env.PORT ?? '3000', 10);
     const server = await buildServer();
-    server.listen({ port: PORT, host: '0.0.0.0' }, (err, addr) => {
-      if (err) { server.log.error(err); process.exit(1); }
-      server.log.info(`Entertainment Business Exchange running at ${addr}`);
-    });
+
+    // Wait for server to be ready before attaching shutdown handlers
+    await server.listen({ port: PORT, host: '0.0.0.0' });
+    server.log.info(`Entertainment Business Exchange running at ${server.listeningOrigin}`);
+
+    // Graceful shutdown
+    async function shutdown(signal: string) {
+      server.log.info(`Received ${signal} — shutting down gracefully`);
+      try {
+        await server.close();
+        server.log.info('Server closed');
+        process.exit(0);
+      } catch (err) {
+        server.log.error(`Error during shutdown: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    }
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
   })();
 }
+
+// Global error boundaries — catch the uncaught
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+  process.exit(1);
+});

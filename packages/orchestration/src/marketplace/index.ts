@@ -1,8 +1,14 @@
 // Marketplace barrel — exports all types and the AgentMarketplace wrapper
 // Integrated from neuroloom/velra (Phase 3 Trust Marketplace) and neuroloom/agent-exchange
+// L3 Marketplace additions: EvidenceValidator + DealRoomEngine
 
 export { AgentMarketplace } from './agent-marketplace.js';
 export { generateAgentReplies } from './agent-exchange.js';
+export { EvidenceValidator } from './evidence-validator.js';
+export { DealRoomEngine } from './deal-room-engine.js';
+
+export type { EvidenceTier, EvidenceValidationResult } from './evidence-validator.js';
+export type { DealState, DealRecord, DealEvent } from './deal-room-engine.js';
 
 export type {
   // Verification & Escrow

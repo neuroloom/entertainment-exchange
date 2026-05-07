@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
 import { executeAgentRun, getPipelineStats, getPipelineVGDO } from '../services/agent-executor.js';
+import { MemoryStore, AuditStore } from '../services/repo.js';
 
 const CreateAgentSchema = z.object({
   name: z.string().min(1),
@@ -19,9 +20,9 @@ const CreateRunSchema = z.object({
   goal: z.string().min(1),
 });
 
-const agents = new Map<string, any>();
+const agents = new MemoryStore('agents');
 const agentRuns = new Map<string, any[]>();
-const auditEvents: any[] = [];
+const auditEvents = new AuditStore();
 
 function writeAudit(ctx: any, action: string, resourceType: string, resourceId: string, businessId?: string, metadata?: Record<string, unknown>) {
   auditEvents.push({
@@ -47,7 +48,7 @@ export async function agentRoutes(app: FastifyInstance) {
       budgetDailyCents: body.budgetDailyCents, metadata: body.metadata ?? {},
       createdAt: new Date().toISOString(),
     };
-    agents.set(agentId, agent);
+    agents.set(agent);
     agentRuns.set(agentId, []);
 
     writeAudit(ctx, 'agent.create', 'agent', agentId, body.businessId ?? undefined);
@@ -57,7 +58,7 @@ export async function agentRoutes(app: FastifyInstance) {
   app.get('/', async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
-    const all = [...agents.values()].filter(a => a.tenantId === ctx.tenantId);
+    const all = agents.all(ctx.tenantId);
     reply.send({ data: all });
   });
 

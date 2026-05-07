@@ -4,6 +4,12 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
+import {
+  idempotencyStore,
+  getRecipeForEvent,
+  RevenueSchedule,
+} from '@entertainment-exchange/orchestration';
+import { AuditStore, JournalStore } from '../services/repo.js';
 
 const PostJournalSchema = z.object({
   businessId: z.string().uuid(),
@@ -19,10 +25,11 @@ const PostJournalSchema = z.object({
 });
 
 const accounts = new Map<string, any[]>();
-const journals: any[] = [];
-const entries: any[] = [];
+const journalStore = new JournalStore();
 const revenueEvents: any[] = [];
-const auditEvents: any[] = [];
+const auditEvents = new AuditStore();
+
+const revenueSchedule = new RevenueSchedule();
 
 function writeAudit(ctx: any, action: string, resourceType: string, resourceId: string, businessId?: string, metadata?: Record<string, unknown>) {
   auditEvents.push({
@@ -62,6 +69,16 @@ export async function ledgerRoutes(app: FastifyInstance) {
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('payment:create')) throw AppError.forbidden('Missing payment:create permission');
 
+    // -- Idempotency check --
+    const idempotencyKey = req.headers['x-idempotency-key'] as string | undefined;
+    if (idempotencyKey) {
+      const cached = idempotencyStore.checkIdempotent(idempotencyKey);
+      if (cached) {
+        reply.status(200).send({ data: { journal: cached.journal, entries: cached.entries } });
+        return;
+      }
+    }
+
     const body = PostJournalSchema.parse(req.body);
 
     // Validate debits = credits
@@ -76,13 +93,16 @@ export async function ledgerRoutes(app: FastifyInstance) {
       occurredAt: body.occurredAt ?? new Date().toISOString(),
       createdAt: new Date().toISOString(),
     };
-    journals.push(journal);
-
     const journalEntries = body.entries.map(e => ({
       id: uuid(), tenantId: ctx.tenantId, journalId,
       accountId: e.accountId, direction: e.direction, amountCents: e.amountCents,
     }));
-    entries.push(...journalEntries);
+    journalStore.addJournal(journal, journalEntries);
+
+    // -- Store idempotency result --
+    if (idempotencyKey) {
+      idempotencyStore.markProcessed(idempotencyKey, journalId, journal, journalEntries);
+    }
 
     writeAudit(ctx, 'ledger.journal', 'journal', journalId, body.businessId, { memo: body.memo, entryCount: journalEntries.length });
     reply.status(201).send({ data: { journal, entries: journalEntries } });
@@ -92,15 +112,15 @@ export async function ledgerRoutes(app: FastifyInstance) {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     const businessId = (req.query as any)?.businessId;
-    const filtered = journals.filter(j => j.tenantId === ctx.tenantId && (!businessId || j.businessId === businessId));
+    const filtered = journalStore.listJournals(ctx.tenantId, businessId);
     reply.send({ data: filtered });
   });
 
   app.get('/journals/:id', async (req, reply) => {
     const ctx = (req as any).ctx;
-    const j = journals.find(j => j.id === (req.params as any).id);
+    const j = journalStore.getJournal((req.params as any).id);
     if (!j || j.tenantId !== ctx.tenantId) throw AppError.notFound('Journal');
-    const journalEntries = entries.filter(e => e.journalId === j.id);
+    const journalEntries = journalStore.getEntries(j.id);
     reply.send({ data: { journal: j, entries: journalEntries } });
   });
 
@@ -110,6 +130,51 @@ export async function ledgerRoutes(app: FastifyInstance) {
     const businessId = (req.query as any)?.businessId;
     const filtered = revenueEvents.filter(e => e.tenantId === ctx.tenantId && (!businessId || e.businessId === businessId));
     reply.send({ data: filtered });
+  });
+
+  app.get('/revenue/schedule', async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    const businessId = (req.query as any)?.businessId;
+    if (!businessId) throw AppError.invalid('businessId query parameter required');
+
+    const recognizable = revenueSchedule.getRecognizableRevenue(businessId);
+    reply.send({ data: recognizable });
+  });
+
+  app.post('/revenue/recognize', async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    if (!ctx.actor.permissions.includes('payment:create')) throw AppError.forbidden('Missing payment:create permission');
+
+    const body = z.object({
+      bookingId: z.string().uuid(),
+    }).parse(req.body);
+
+    const scheduled = revenueSchedule.recognizeRevenue(body.bookingId);
+
+    // Post the RECOGNIZE_RECIPE as a journal entry
+    const { entries: recipeEntries } = getRecipeForEvent('recognize')(scheduled.amount);
+    const journalId = uuid();
+    const journal = {
+      id: journalId, tenantId: ctx.tenantId, businessId: scheduled.businessId,
+      memo: `Revenue recognition for booking ${body.bookingId}`,
+      referenceType: 'booking', referenceId: body.bookingId,
+      occurredAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    };
+    const journalEntries = recipeEntries.map(e => ({
+      id: uuid(), tenantId: ctx.tenantId, journalId,
+      accountId: accountIdByCode(scheduled.businessId, ctx.tenantId, e.accountCode),
+      direction: e.direction, amountCents: e.amount,
+    }));
+    journalStore.addJournal(journal, journalEntries);
+
+    writeAudit(ctx, 'ledger.recognize', 'journal', journalId, scheduled.businessId, {
+      bookingId: body.bookingId, amountCents: scheduled.amount,
+    });
+
+    reply.status(201).send({ data: { journal, entries: journalEntries, recognition: scheduled } });
   });
 
   app.post('/revenue', async (req, reply) => {
@@ -134,7 +199,63 @@ export async function ledgerRoutes(app: FastifyInstance) {
       metadata: {}, createdAt: new Date().toISOString(),
     };
     revenueEvents.push(event);
-    writeAudit(ctx, 'revenue.create', 'revenue_event', event.id, body.businessId);
-    reply.status(201).send({ data: event });
+
+    // -- Wire the revenue recipe into a journal entry --
+    const recipe = getRecipeForEvent(body.eventType);
+    const { entries: recipeEntries } = recipe(body.amountCents);
+
+    seedDefaultAccounts(body.businessId, ctx.tenantId);
+
+    const journalId = uuid();
+    const journal = {
+      id: journalId, tenantId: ctx.tenantId, businessId: body.businessId,
+      memo: `Revenue event: ${body.eventType}`,
+      referenceType: body.referenceType ?? 'revenue_event',
+      referenceId: body.referenceId ?? event.id,
+      occurredAt: body.recognitionDate ?? new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    };
+    const journalEntries = recipeEntries.map(e => ({
+      id: uuid(), tenantId: ctx.tenantId, journalId,
+      accountId: accountIdByCode(body.businessId, ctx.tenantId, e.accountCode),
+      direction: e.direction, amountCents: e.amount,
+    }));
+    journalStore.addJournal(journal, journalEntries);
+
+    // If a future recognitionDate is provided and the event type is 'deposit',
+    // schedule it for later recognition.
+    if (body.eventType.toLowerCase() === 'deposit' && body.recognitionDate && body.referenceId) {
+      revenueSchedule.scheduleRecognition(
+        body.referenceId,          // bookingId
+        body.businessId,
+        body.amountCents,
+        body.recognitionDate,
+      );
+    }
+
+    writeAudit(ctx, 'revenue.create', 'revenue_event', event.id, body.businessId, {
+      eventType: body.eventType,
+      journalId,
+      recipeEntries: recipeEntries.length,
+    });
+
+    reply.status(201).send({
+      data: {
+        event,
+        journal,
+        entries: journalEntries,
+      },
+    });
   });
+}
+
+/** Resolve an accountId by businessId + accountCode. Creates the accounts if needed. */
+function accountIdByCode(businessId: string, tenantId: string, code: string): string {
+  seedDefaultAccounts(businessId, tenantId);
+  const accts = accounts.get(businessId) ?? [];
+  const found = accts.find((a: any) => a.code === code);
+  if (!found) {
+    throw AppError.invalid(`Account code not found: ${code}. Ensure default accounts are seeded.`);
+  }
+  return found.id as string;
 }

@@ -13,6 +13,7 @@ export interface RequestContext {
   traceId: string;
   tenantId: string;
   businessId?: string;
+  sanitized?: boolean;
   actor: {
     type: 'human' | 'agent' | 'system' | 'provider';
     id: string;

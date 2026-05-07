@@ -1,0 +1,56 @@
+# Entertainment Business Exchange — Docker Compose
+version: "3.9"
+
+services:
+  api:
+    build: .
+    container_name: entx-api
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - DATABASE_URL=postgres://entx:entx_secret@db:5432/entertainment_exchange
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend
+    restart: unless-stopped
+
+  db:
+    image: postgres:16
+    container_name: entx-db
+    environment:
+      POSTGRES_USER: entx
+      POSTGRES_PASSWORD: entx_secret
+      POSTGRES_DB: entertainment_exchange
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U entx -d entertainment_exchange"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: entx-redis
+  #   ports:
+  #     - "6379:6379"
+  #   networks:
+  #     - backend
+  #   restart: unless-stopped
+
+volumes:
+  pgdata:
+
+networks:
+  backend:
+    driver: bridge

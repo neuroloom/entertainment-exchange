@@ -1,5 +1,6 @@
 // E2E Golden Path Seed — exercises every domain in the Entertainment Business Exchange
 // Run: npx tsx src/seed.ts
+process.env.JWT_SECRET = 'seed-e2e-jwt-secret-at-least-32-chars-long!';
 import { buildServer } from './server.js';
 
 function headers(tenantId: string, perms: string[], actorId = 'seed-user', actorType = 'human') {
@@ -138,10 +139,10 @@ async function main() {
 
   const rev = await app.inject({
     method: 'POST', url: '/api/v1/ledger/revenue', headers: h(),
-    payload: { businessId, eventType: 'deposit_recognized', amountCents: 175000,
+    payload: { businessId, eventType: 'deposit', amountCents: 175000,
       recognitionDate: '2026-08-15', referenceType: 'booking', referenceId: bookingId },
   });
-  expect('Revenue event', rev.statusCode === 201 && rev.json().data?.amountCents === 175000);
+  expect('Revenue event', rev.statusCode === 201 && rev.json().data?.event?.amountCents === 175000);
 
   // ── 5. AGENTS — Create + Run ────────────────────────────────────
   console.log('\n── 5. Agent ──');
