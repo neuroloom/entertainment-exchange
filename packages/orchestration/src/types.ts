@@ -79,6 +79,8 @@ export interface MetricSnapshot {
   lruHits: number;
   semanticHits: number;
   modelHits: number;
+  coalescedHits: number;
+  redLoomRejects: number;
   ollamaCalls: number;
   errors: number;
   avgLatencyMs: number;

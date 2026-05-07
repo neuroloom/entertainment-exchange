@@ -37,12 +37,23 @@ export class SemanticCache {
   constructor(private maxEntries = 100_000, private threshold = S_ISO_THRESHOLD) {}
 
   put(key: string, prompt: string, response: string, embedding: number[]): void {
+    // Guard: skip zero-magnitude vectors (can never match cosine)
+    const mag = Math.sqrt(embedding.reduce((s, v) => s + v * v, 0));
+    if (mag === 0) return;
     this.entries.push({ key, prompt, response, embedding, contentHash: hashFNV(prompt), createdAt: Date.now(), hits: 0 });
-    if (this.entries.length > this.maxEntries) { this.entries.splice(0, this.entries.length - this.maxEntries); }
+    if (this.entries.length > this.maxEntries) {
+      // Evict oldest entries, but preserve recency-biased distribution
+      const removed = this.entries.length - this.maxEntries;
+      this.entries.splice(0, removed);
+    }
   }
 
   query(embedding: number[]): { response: string; similarity: number } | undefined {
     if (this.entries.length === 0) { this.missCount++; return undefined; }
+    // Zero-vector short-circuit: if query has no magnitude, skip expensive cosine loop
+    const queryMag = Math.sqrt(embedding.reduce((s, v) => s + v * v, 0));
+    if (queryMag === 0) { this.missCount++; return undefined; }
+
     let best: SemanticCacheEntry | undefined;
     let bestSim = -1;
     for (const entry of this.entries) {
@@ -114,6 +125,8 @@ export class MetricsCollector {
     const lruHits = this.get('lruHit');
     const semHits = this.get('semanticHit');
     const modelHits = this.get('modelHit');
+    const coalescedHits = this.get('coalescedHit');
+    const redLoomRejects = this.get('redLoomReject');
     const ollama = this.get('ollamaCall');
     const errors = this.get('error');
     const sorted = [...this.latencies].sort((a, b) => a - b);
@@ -122,10 +135,11 @@ export class MetricsCollector {
     const elapsed = (Date.now() - this.startTime) / 1000;
     const tokens = this.get('tokens');
     return {
-      totalRequests: total, lruHits, semanticHits: semHits, modelHits, ollamaCalls: ollama, errors,
+      totalRequests: total, lruHits, semanticHits: semHits, modelHits, coalescedHits, redLoomRejects,
+      ollamaCalls: ollama, errors,
       avgLatencyMs: Math.round(avg * 1000) / 1000,
       p95LatencyMs: Math.round(p95 * 1000) / 1000,
-      hitRate: (lruHits + semHits + modelHits) / total,
+      hitRate: (lruHits + semHits + modelHits + coalescedHits) / total,
       tokensPerSecond: elapsed > 0 ? Math.round(tokens / elapsed) : 0,
       timestamp: Date.now(),
     };
