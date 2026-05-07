@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
+import { executeAgentRun, getPipelineStats, getPipelineVGDO } from '../services/agent-executor.js';
 
 const CreateAgentSchema = z.object({
   name: z.string().min(1),
@@ -78,16 +79,37 @@ export async function agentRoutes(app: FastifyInstance) {
     const body = CreateRunSchema.parse(req.body);
     const runId = uuid();
 
+    // Execute via OMEGA pipeline — caches similar goals, batches concurrent runs, routes to cheapest model
+    const output = await executeAgentRun({
+      runId, agentId: agent.id, agentName: agent.name, agentRole: agent.role,
+      goal: body.goal, autonomyLevel: agent.autonomyLevel, budgetCents: agent.budgetDailyCents,
+    });
+
     const run = {
       id: runId, tenantId: ctx.tenantId, businessId: agent.businessId,
-      agentId: agent.id, status: 'created', goal: body.goal,
-      costCents: 0, output: {}, startedAt: new Date().toISOString(), endedAt: null,
+      agentId: agent.id, status: output.cached ? 'completed_cached' : 'completed',
+      goal: body.goal, costCents: output.costCents,
+      output: { result: output.result, tokensIn: output.tokensIn, tokensOut: output.tokensOut,
+        modelUsed: output.modelUsed, cached: output.cached,
+        omegaQuality: output.omegaQuality, vgdoGrade: output.vgdoGrade, latencyMs: output.latencyMs },
+      startedAt: new Date(Date.now() - output.latencyMs).toISOString(),
+      endedAt: new Date().toISOString(),
     };
     if (!agentRuns.has(agent.id)) agentRuns.set(agent.id, []);
     agentRuns.get(agent.id)!.push(run);
 
-    writeAudit(ctx, 'agent.run', 'agent_run', runId, agent.businessId);
+    writeAudit(ctx, 'agent.run', 'agent_run', runId, agent.businessId,
+      { cached: output.cached, model: output.modelUsed, costCents: output.costCents, omega: output.omegaQuality });
     reply.status(201).send({ data: run });
+  });
+
+  // OMEGA pipeline stats
+  app.get('/pipeline/stats', async (req, reply) => {
+    reply.send({ data: getPipelineStats() });
+  });
+
+  app.get('/pipeline/vgdo', async (req, reply) => {
+    reply.send({ data: getPipelineVGDO() });
   });
 
   app.get('/:id/runs', async (req, reply) => {
