@@ -6,6 +6,8 @@ import { LRUCache, SemanticCache, BatchProcessor, MetricsCollector } from './war
 import { SNPGovernance, FedSyncReceiver, computeVGDO } from './omega-governance.js';
 import { TaskRouter, NgramEmbedder } from './auto-router.js';
 import { AgentMarketplace } from './marketplace/agent-marketplace.js';
+import { getEmbeddingProvider } from './embeddings.js';
+import type { EmbeddingProvider } from './embeddings.js';
 import {
   OMEGA_FLOOR, OMEGA_RED_LOOM, WARP_LATENCY_US, S_ISO_THRESHOLD, DEFAULT_OMEGA_CONFIG,
 } from './types.js';
@@ -25,6 +27,8 @@ export class OutputMaximizer {
   readonly router = new TaskRouter();
   // Shared embedder (avoid recomputing ngrams per call)
   readonly embedder = new NgramEmbedder(3);
+  // Real embedding provider (lazy-init, graceful fallback to ngrams)
+  private embeddingProvider: EmbeddingProvider | null | undefined = undefined;
   // Marketplace (from neuroloom/velra + neuroloom/agent-exchange)
   readonly marketplace = new AgentMarketplace();
   // Metrics
@@ -90,8 +94,8 @@ export class OutputMaximizer {
       return inFlight;
     }
 
-    // Layer 1: Semantic similarity via shared embedder (no re-instantiation)
-    const embedding = this.embedder.embed(request.prompt);
+    // Layer 1: Semantic similarity — real embeddings when available, ngram fallback
+    const embedding = await this.embedAsync(request.prompt);
     const semHit = this.semantic.query(embedding);
     if (semHit) {
       this.metrics.increment('semanticHit');
@@ -186,6 +190,25 @@ export class OutputMaximizer {
 
   get omega(): number { return this.currentOmega; }
   getStats(): MetricSnapshot { return this.metrics.snapshot(); }
+
+  /** Lazy-init embedding provider. Real embeddings when OPENAI_API_KEY is set, ngram fallback otherwise. */
+  private async embedAsync(text: string): Promise<number[]> {
+    if (this.embeddingProvider === undefined) {
+      try {
+        this.embeddingProvider = getEmbeddingProvider();
+      } catch {
+        this.embeddingProvider = null;
+      }
+    }
+    if (this.embeddingProvider) {
+      try {
+        return await this.embeddingProvider.embed(text);
+      } catch {
+        this.embeddingProvider = null;
+      }
+    }
+    return this.embedder.embed(text);
+  }
 
   hydratePatterns(patterns: FedSyncPattern[]): number {
     let accepted = 0;

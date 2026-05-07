@@ -6,6 +6,7 @@ import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
 import { assertBookingTransition, calculateQuote, BookingStateError } from '@entertainment-exchange/orchestration';
 import type { BookingState } from '@entertainment-exchange/orchestration';
+import { MemoryStore, AuditStore } from '../services/repo.js';
 
 const CreateBookingSchema = z.object({
   eventType: z.string().min(1),
@@ -30,8 +31,8 @@ const PatchBookingStatusSchema = z.object({
   reason: z.string().optional(),
 });
 
-const bookings = new Map<string, any>();
-const auditEvents: any[] = [];
+const bookings = new MemoryStore('bookings');
+const auditEvents = new AuditStore();
 
 function writeAudit(ctx: any, action: string, resourceType: string, resourceId: string, businessId?: string, metadata?: Record<string, unknown>) {
   auditEvents.push({
@@ -76,7 +77,7 @@ export async function bookingRoutes(app: FastifyInstance) {
       source: body.source ?? null, metadata: body.metadata ?? {},
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
-    bookings.set(bookingId, booking);
+    bookings.set(booking);
     writeAudit(ctx, 'booking.create', 'booking', bookingId, ctx.businessId);
     reply.status(201).send({ data: { ...booking, quote: quote ?? undefined } });
   });
@@ -84,7 +85,7 @@ export async function bookingRoutes(app: FastifyInstance) {
   app.get('/bookings', async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
-    const all = [...bookings.values()].filter(b => b.tenantId === ctx.tenantId);
+    const all = bookings.all(ctx.tenantId);
     reply.send({ data: all });
   });
 
@@ -117,7 +118,7 @@ export async function bookingRoutes(app: FastifyInstance) {
 
     booking.status = body.status;
     booking.updatedAt = new Date().toISOString();
-    bookings.set(booking.id, booking);
+    bookings.set(booking);
 
     writeAudit(ctx, 'booking.status', 'booking', booking.id, booking.businessId, { status: body.status, reason: body.reason });
     reply.send({ data: booking });

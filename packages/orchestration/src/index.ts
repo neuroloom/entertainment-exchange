@@ -2,6 +2,8 @@ export { OutputMaximizer } from './output-maximizer.js';
 export { LRUCache, SemanticCache, BatchProcessor, MetricsCollector } from './warp-cache.js';
 export { SNPGovernance, FedSyncReceiver, computeVGDO, cosineSimilarity } from './omega-governance.js';
 export { TaskRouter, NgramEmbedder, SkillIndex } from './auto-router.js';
+export { OpenAIEmbeddingProvider, getEmbeddingProvider, setEmbeddingProvider, vectorFallback } from './embeddings.js';
+export type { EmbeddingProvider } from './embeddings.js';
 export { runBenchmark, findMaxThroughput } from './benchmark.js';
 export {
   OMEGA_FLOOR, OMEGA_RED_LOOM, OMEGA_SNP, OMEGA_SEVERANCE,

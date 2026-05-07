@@ -9,6 +9,7 @@ import {
   getRecipeForEvent,
   RevenueSchedule,
 } from '@entertainment-exchange/orchestration';
+import { AuditStore, JournalStore } from '../services/repo.js';
 
 const PostJournalSchema = z.object({
   businessId: z.string().uuid(),
@@ -24,10 +25,9 @@ const PostJournalSchema = z.object({
 });
 
 const accounts = new Map<string, any[]>();
-const journals: any[] = [];
-const entries: any[] = [];
+const journalStore = new JournalStore();
 const revenueEvents: any[] = [];
-const auditEvents: any[] = [];
+const auditEvents = new AuditStore();
 
 const revenueSchedule = new RevenueSchedule();
 
@@ -93,13 +93,11 @@ export async function ledgerRoutes(app: FastifyInstance) {
       occurredAt: body.occurredAt ?? new Date().toISOString(),
       createdAt: new Date().toISOString(),
     };
-    journals.push(journal);
-
     const journalEntries = body.entries.map(e => ({
       id: uuid(), tenantId: ctx.tenantId, journalId,
       accountId: e.accountId, direction: e.direction, amountCents: e.amountCents,
     }));
-    entries.push(...journalEntries);
+    journalStore.addJournal(journal, journalEntries);
 
     // -- Store idempotency result --
     if (idempotencyKey) {
@@ -114,15 +112,15 @@ export async function ledgerRoutes(app: FastifyInstance) {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     const businessId = (req.query as any)?.businessId;
-    const filtered = journals.filter(j => j.tenantId === ctx.tenantId && (!businessId || j.businessId === businessId));
+    const filtered = journalStore.listJournals(ctx.tenantId, businessId);
     reply.send({ data: filtered });
   });
 
   app.get('/journals/:id', async (req, reply) => {
     const ctx = (req as any).ctx;
-    const j = journals.find(j => j.id === (req.params as any).id);
+    const j = journalStore.getJournal((req.params as any).id);
     if (!j || j.tenantId !== ctx.tenantId) throw AppError.notFound('Journal');
-    const journalEntries = entries.filter(e => e.journalId === j.id);
+    const journalEntries = journalStore.getEntries(j.id);
     reply.send({ data: { journal: j, entries: journalEntries } });
   });
 
@@ -165,14 +163,12 @@ export async function ledgerRoutes(app: FastifyInstance) {
       occurredAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
     };
-    journals.push(journal);
-
     const journalEntries = recipeEntries.map(e => ({
       id: uuid(), tenantId: ctx.tenantId, journalId,
       accountId: accountIdByCode(scheduled.businessId, ctx.tenantId, e.accountCode),
       direction: e.direction, amountCents: e.amount,
     }));
-    entries.push(...journalEntries);
+    journalStore.addJournal(journal, journalEntries);
 
     writeAudit(ctx, 'ledger.recognize', 'journal', journalId, scheduled.businessId, {
       bookingId: body.bookingId, amountCents: scheduled.amount,
@@ -219,14 +215,12 @@ export async function ledgerRoutes(app: FastifyInstance) {
       occurredAt: body.recognitionDate ?? new Date().toISOString(),
       createdAt: new Date().toISOString(),
     };
-    journals.push(journal);
-
     const journalEntries = recipeEntries.map(e => ({
       id: uuid(), tenantId: ctx.tenantId, journalId,
       accountId: accountIdByCode(body.businessId, ctx.tenantId, e.accountCode),
       direction: e.direction, amountCents: e.amount,
     }));
-    entries.push(...journalEntries);
+    journalStore.addJournal(journal, journalEntries);
 
     // If a future recognitionDate is provided and the event type is 'deposit',
     // schedule it for later recognition.

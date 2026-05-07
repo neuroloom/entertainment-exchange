@@ -21,6 +21,9 @@ RUN cd apps/api && npx tsc
 # Stage 2: Production runtime (minimal)
 FROM node:20-slim AS runtime
 
+# Install curl for health checks
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
 # Create non-root user
 RUN groupadd -r entx && useradd -r -g entx -d /app -s /sbin/nologin entx
 

@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
+import { MemoryStore, AuditStore } from '../services/repo.js';
 import {
   PassportVerifier,
   TransferabilityScorer,
@@ -38,13 +39,13 @@ const IssuePassportSchema = z.object({
   expiresAt: z.string().optional(),
 });
 
-const anchors = new Map<string, LegalAnchor>();
-const assets = new Map<string, RightsAsset>();
-const passports = new Map<string, RightsPassport>();
-const auditEvents: any[] = [];
+const anchors = new MemoryStore<LegalAnchor>('legal_anchors');
+const assets = new MemoryStore<RightsAsset>('rights_assets');
+const passports = new MemoryStore<RightsPassport>('rights_passports');
+const auditEvents = new AuditStore();
 
 // Create a shared PassportVerifier backed by the route-level stores
-const passVerifier = new PassportVerifier({ anchors, assets, passports });
+const passVerifier = new PassportVerifier({ anchors: anchors as any, assets: assets as any, passports: passports as any });
 
 function writeAudit(ctx: any, action: string, resourceType: string, resourceId: string, businessId?: string, metadata?: Record<string, unknown>) {
   auditEvents.push({
@@ -69,7 +70,7 @@ export async function rightsRoutes(app: FastifyInstance) {
       documentHash: body.documentHash, documentType: body.documentType,
       metadata: body.metadata ?? {}, createdAt: new Date().toISOString(),
     };
-    anchors.set(anchorId, anchor);
+    anchors.set(anchor);
     writeAudit(ctx, 'anchor.create', 'legal_anchor', anchorId, undefined, { documentType: body.documentType });
     reply.status(201).send({ data: anchor });
   });
@@ -77,7 +78,7 @@ export async function rightsRoutes(app: FastifyInstance) {
   app.get('/anchors', async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
-    reply.send({ data: [...anchors.values()].filter(a => a.tenantId === ctx.tenantId) });
+    reply.send({ data: anchors.all(ctx.tenantId) });
   });
 
   app.get('/anchors/:id', async (req, reply) => {
@@ -101,7 +102,7 @@ export async function rightsRoutes(app: FastifyInstance) {
       assetType: body.assetType, title: body.title, status: 'active',
       metadata: body.metadata ?? {}, createdAt: new Date().toISOString(),
     };
-    assets.set(assetId, asset);
+    assets.set(asset);
     writeAudit(ctx, 'asset.create', 'rights_asset', assetId, body.businessId);
     reply.status(201).send({ data: asset });
   });
@@ -109,7 +110,7 @@ export async function rightsRoutes(app: FastifyInstance) {
   app.get('/assets', async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
-    reply.send({ data: [...assets.values()].filter(a => a.tenantId === ctx.tenantId) });
+    reply.send({ data: assets.all(ctx.tenantId) });
   });
 
   app.get('/assets/:id', async (req, reply) => {
@@ -163,7 +164,7 @@ export async function rightsRoutes(app: FastifyInstance) {
   app.get('/passports', async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
-    reply.send({ data: [...passports.values()].filter(p => p.tenantId === ctx.tenantId) });
+    reply.send({ data: passports.all(ctx.tenantId) });
   });
 
   app.get('/passports/:id', async (req, reply) => {
@@ -198,10 +199,10 @@ export async function rightsRoutes(app: FastifyInstance) {
     const businessId = (req.params as any).id;
 
     // Collect business profile from across the rights store
-    const businessAssets = [...assets.values()].filter(a => a.businessId === businessId && a.tenantId === ctx.tenantId);
-    const businessPassports = [...passports.values()].filter(p => {
+    const businessAssets = assets.all(ctx.tenantId).filter(a => a.businessId === businessId);
+    const businessPassports = passports.all(ctx.tenantId).filter(p => {
       const a = assets.get(p.rightsAssetId);
-      return a?.businessId === businessId && p.tenantId === ctx.tenantId;
+      return a?.businessId === businessId;
     });
 
     let verifiedAnchors = 0;

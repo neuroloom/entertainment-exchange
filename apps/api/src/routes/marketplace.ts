@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
+import { MemoryStore, AuditStore } from '../services/repo.js';
 
 const CreateListingSchema = z.object({
   sellerBusinessId: z.string().uuid(),
@@ -19,9 +20,9 @@ const CreateDealSchema = z.object({
   buyerUserId: z.string().uuid().optional(),
 });
 
-const listings = new Map<string, any>();
+const listings = new MemoryStore('listings');
 const deals = new Map<string, any[]>();
-const auditEvents: any[] = [];
+const auditEvents = new AuditStore();
 
 function writeAudit(ctx: any, action: string, resourceType: string, resourceId: string, businessId?: string, metadata?: Record<string, unknown>) {
   auditEvents.push({
@@ -47,7 +48,7 @@ export async function marketplaceRoutes(app: FastifyInstance) {
       evidenceTier: body.evidenceTier, metadata: body.metadata ?? {},
       publishedAt: null, createdAt: new Date().toISOString(),
     };
-    listings.set(listingId, listing);
+    listings.set(listing);
 
     writeAudit(ctx, 'listing.create', 'listing', listingId, body.sellerBusinessId);
     reply.status(201).send({ data: listing });
@@ -56,7 +57,7 @@ export async function marketplaceRoutes(app: FastifyInstance) {
   app.get('/listings', async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
-    const all = [...listings.values()].filter(l => l.tenantId === ctx.tenantId);
+    const all = listings.all(ctx.tenantId);
     reply.send({ data: all });
   });
 
@@ -77,7 +78,7 @@ export async function marketplaceRoutes(app: FastifyInstance) {
 
     listing.status = 'published';
     listing.publishedAt = new Date().toISOString();
-    listings.set(listing.id, listing);
+    listings.set(listing);
 
     writeAudit(ctx, 'listing.publish', 'listing', listing.id, listing.sellerBusinessId);
     reply.send({ data: listing });
