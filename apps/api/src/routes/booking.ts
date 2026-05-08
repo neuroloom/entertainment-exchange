@@ -1,12 +1,15 @@
 // Booking routes — CRUD + confirm/cancel, client, artist, venue references
 // Task 006: POST /bookings, GET /bookings, GET /bookings/:id, PATCH /bookings/:id/status
+// Sprint 3a: POST /bookings/:id/cancel, paginated GET /bookings
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
-import { assertBookingTransition, calculateQuote, BookingStateError } from '@entertainment-exchange/orchestration';
+import { assertBookingTransition, calculateQuote, BookingStateError, isTerminalState } from '@entertainment-exchange/orchestration';
 import type { BookingState } from '@entertainment-exchange/orchestration';
-import { MemoryStore, AuditStore } from '../services/repo.js';
+import type { PaginatedResponse } from '@entertainment-exchange/shared';
+import { MemoryStore, AuditStore, JournalStore } from '../services/repo.js';
+import { getBusinessAccountMap } from './business.js';
 
 const CreateBookingSchema = z.object({
   eventType: z.string().min(1),
@@ -27,12 +30,13 @@ const CreateBookingSchema = z.object({
 });
 
 const PatchBookingStatusSchema = z.object({
-  status: z.enum(['inquiry', 'tentative', 'confirmed', 'contracted', 'completed', 'cancelled']),
+  status: z.enum(['inquiry', 'tentative', 'confirmed', 'contracted', 'completed', 'cancelled', 'refunded']),
   reason: z.string().optional(),
 });
 
 const bookings = new MemoryStore('bookings');
 const auditEvents = new AuditStore();
+const journals = new JournalStore();
 
 function writeAudit(ctx: any, action: string, resourceType: string, resourceId: string, businessId?: string, metadata?: Record<string, unknown>) {
   auditEvents.push({

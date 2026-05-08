@@ -1,14 +1,22 @@
 // Business routes — create business, default chart of accounts
 // Task 005: POST /businesses → business_entities + ledger_accounts + audit_events
+// Sprint 3a: PUT /businesses/:id, DELETE /businesses/:id, paginated GET /businesses
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
+import type { PaginatedResponse } from '@entertainment-exchange/shared';
 import { MemoryStore, AuditStore } from '../services/repo.js';
 
 const CreateBusinessSchema = z.object({
   name: z.string().min(1),
   vertical: z.string().default('entertainment'),
+  legalName: z.string().optional(),
+});
+
+const UpdateBusinessSchema = z.object({
+  name: z.string().min(1).optional(),
+  vertical: z.string().optional(),
   legalName: z.string().optional(),
 });
 
@@ -32,6 +40,17 @@ function writeAudit(ctx: any, action: string, resourceType: string, resourceId: 
     actorId: ctx.actor.id, action, resourceType, resourceId, metadata: metadata ?? {},
     createdAt: new Date().toISOString(),
   });
+}
+
+/** Lookup helper for booking reversal — returns code→accountId map for a business.
+ *  Imported by booking.ts when creating reversal journal entries. */
+export function getBusinessAccountMap(businessId: string): Map<string, string> {
+  const map = new Map<string, string>();
+  const accounts = ledgerAccounts.get(businessId) ?? [];
+  for (const a of accounts) {
+    map.set(a.code, a.id);
+  }
+  return map;
 }
 
 export async function businessRoutes(app: FastifyInstance) {
@@ -66,8 +85,17 @@ export async function businessRoutes(app: FastifyInstance) {
   app.get('/businesses', async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
+
+    const query = req.query as Record<string, string>;
+    const limit = query.limit ? parseInt(query.limit, 10) : 50;
+    const offset = query.offset ? parseInt(query.offset, 10) : 0;
+
     const all = businesses.all(ctx.tenantId);
-    reply.send({ data: all });
+    const total = all.length;
+    const data = all.slice(offset, offset + limit);
+
+    const response: PaginatedResponse<typeof data[number]> = { data, total, limit, offset };
+    reply.send(response);
   });
 
   app.get('/businesses/:id', async (req, reply) => {
@@ -87,5 +115,42 @@ export async function businessRoutes(app: FastifyInstance) {
         grossMargin: 0, automationCoverage: 0, transferabilityScore: 0,
       },
     });
+  });
+
+  app.put('/businesses/:id', async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    if (!ctx.actor.permissions.includes('business:manage')) throw AppError.forbidden('Missing business:manage permission');
+
+    const b = businesses.get((req.params as any).id);
+    if (!b || b.tenantId !== ctx.tenantId) throw AppError.notFound('Business');
+
+    const body = UpdateBusinessSchema.parse(req.body);
+
+    if (body.name !== undefined) b.name = body.name;
+    if (body.vertical !== undefined) b.vertical = body.vertical;
+    if (body.legalName !== undefined) b.legalName = body.legalName;
+    b.updatedAt = new Date().toISOString();
+    businesses.set(b);
+
+    writeAudit(ctx, 'business.update', 'business', b.id, b.id, { changes: body });
+    reply.send({ data: b });
+  });
+
+  app.delete('/businesses/:id', async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    if (!ctx.actor.permissions.includes('business:manage')) throw AppError.forbidden('Missing business:manage permission');
+
+    const b = businesses.get((req.params as any).id);
+    if (!b || b.tenantId !== ctx.tenantId) throw AppError.notFound('Business');
+    if (b.status === 'archived') throw AppError.invalid('Business already archived');
+
+    b.status = 'archived';
+    b.updatedAt = new Date().toISOString();
+    businesses.set(b);
+
+    writeAudit(ctx, 'business.archive', 'business', b.id, b.id);
+    reply.send({ data: b });
   });
 }

@@ -42,6 +42,8 @@ export type DealState =
   | 'legal_review'
   | 'closing'
   | 'completed'
+  | 'disputed'
+  | 'resolved'
   | 'rejected'
   | 'cancelled'
   | 'expired';
@@ -80,13 +82,15 @@ const VALID_TRANSITIONS: Record<DealState, DealState[]> = {
   created:              ['offer_submitted', 'cancelled'],
   offer_submitted:      ['offer_accepted', 'rejected', 'expired', 'cancelled'],
   offer_accepted:       ['due_diligence', 'cancelled'],
-  due_diligence:        ['terms_negotiated', 'cancelled'],
-  terms_negotiated:     ['terms_agreed', 'cancelled'],
-  terms_agreed:         ['escrow_funded', 'cancelled'],
-  escrow_funded:        ['legal_review', 'cancelled'],
-  legal_review:         ['closing', 'cancelled'],
-  closing:              ['completed', 'cancelled'],
+  due_diligence:        ['terms_negotiated', 'disputed', 'cancelled'],
+  terms_negotiated:     ['terms_agreed', 'disputed', 'cancelled'],
+  terms_agreed:         ['escrow_funded', 'disputed', 'cancelled'],
+  escrow_funded:        ['legal_review', 'disputed', 'cancelled'],
+  legal_review:         ['closing', 'disputed', 'cancelled'],
+  closing:              ['completed', 'disputed', 'cancelled'],
   completed:            [],   // terminal
+  disputed:             ['resolved', 'cancelled'],
+  resolved:             [],   // terminal
   rejected:             [],   // terminal
   cancelled:            [],   // terminal
   expired:              [],   // terminal
@@ -246,7 +250,38 @@ export class DealRoomEngine {
     return this.doTransition(deal, 'closing', 'advance_closing');
   }
 
-  // ── Terminal transitions ─────────────────────────────────────────────────
+  // ── transitionDeal: generic state transition with guard validation ────────
+
+  transitionDeal(dealId: string, newStatus: DealState, metadata?: Record<string, unknown>): DealRecord {
+    const deal = this.mustGet(dealId);
+    this.assertDealTransition(deal, newStatus);
+    const from = deal.state;
+    deal.state = newStatus;
+    this.recordEvent(deal, from, `transition:${newStatus}`, metadata);
+    return { ...deal };
+  }
+
+  // ── disputeDeal: transition to disputed side state ────────────────────────
+
+  disputeDeal(dealId: string, reason?: string): DealRecord {
+    const deal = this.mustGet(dealId);
+    this.assertDealTransition(deal, 'disputed');
+    const from = deal.state;
+    deal.state = 'disputed';
+    this.recordEvent(deal, from, 'dispute_deal', { reason });
+    return { ...deal };
+  }
+
+  // ── resolveDeal: resolve a disputed deal ──────────────────────────────────
+
+  resolveDeal(dealId: string, resolution?: string): DealRecord {
+    const deal = this.mustGet(dealId);
+    this.assertDealTransition(deal, 'resolved');
+    const from = deal.state;
+    deal.state = 'resolved';
+    this.recordEvent(deal, from, 'resolve_deal', { resolution });
+    return { ...deal };
+  }
 
   rejectDeal(dealId: string): DealRecord {
     const deal = this.mustGet(dealId);

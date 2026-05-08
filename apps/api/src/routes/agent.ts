@@ -1,11 +1,13 @@
 // Agent routes — agent CRUD, runs, autonomy levels
 // Task 020-025: POST /agents, GET /agents, POST /agents/:id/runs, GET /agents/:id/runs
+// Sprint 3b: PATCH /agents/:id, DELETE /agents/:id, pagination on GET
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
 import { executeAgentRun, getPipelineStats, getPipelineVGDO } from '../services/agent-executor.js';
 import { MemoryStore, AuditStore } from '../services/repo.js';
+import { paginate, paginatedResponse } from '../plugins/paginate.plugin.js';
 
 const CreateAgentSchema = z.object({
   name: z.string().min(1),
@@ -14,6 +16,13 @@ const CreateAgentSchema = z.object({
   autonomyLevel: z.number().int().min(0).max(5).default(1),
   budgetDailyCents: z.number().int().min(0).default(0),
   metadata: z.record(z.unknown()).optional(),
+});
+
+const UpdateAgentSchema = z.object({
+  name: z.string().min(1).optional(),
+  role: z.string().min(1).optional(),
+  autonomyLevel: z.number().int().min(0).max(5).optional(),
+  budgetDailyCents: z.number().int().min(0).optional(),
 });
 
 const CreateRunSchema = z.object({
@@ -55,11 +64,14 @@ export async function agentRoutes(app: FastifyInstance) {
     reply.status(201).send({ data: agent });
   });
 
+  // Sprint 3b: pagination with ?limit=&offset=
   app.get('/', async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     const all = agents.all(ctx.tenantId);
-    reply.send({ data: all });
+    const p = paginate(req.query);
+    const sliced = all.slice(p.offset, p.offset + p.limit);
+    reply.send(paginatedResponse(sliced, all.length, p));
   });
 
   app.get('/:id', async (req, reply) => {
@@ -67,6 +79,42 @@ export async function agentRoutes(app: FastifyInstance) {
     const a = agents.get((req.params as any).id);
     if (!a || a.tenantId !== ctx.tenantId) throw AppError.notFound('Agent');
     reply.send({ data: a });
+  });
+
+  // Sprint 3b: PATCH /agents/:id — update agent name, role, autonomyLevel, budgetDailyCents
+  app.patch('/:id', async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    if (!ctx.actor.permissions.includes('agent:run')) throw AppError.forbidden('Missing agent:run permission');
+
+    const agent = agents.get((req.params as any).id);
+    if (!agent || agent.tenantId !== ctx.tenantId) throw AppError.notFound('Agent');
+
+    const body = UpdateAgentSchema.parse(req.body);
+
+    if (body.name !== undefined) agent.name = body.name;
+    if (body.role !== undefined) agent.role = body.role;
+    if (body.autonomyLevel !== undefined) agent.autonomyLevel = body.autonomyLevel;
+    if (body.budgetDailyCents !== undefined) agent.budgetDailyCents = body.budgetDailyCents;
+
+    agents.set(agent);
+    writeAudit(ctx, 'agent.update', 'agent', agent.id, agent.businessId, { changed: Object.keys(body) });
+    reply.send({ data: agent });
+  });
+
+  // Sprint 3b: DELETE /agents/:id — soft-delete (set status to 'inactive')
+  app.delete('/:id', async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    if (!ctx.actor.permissions.includes('agent:run')) throw AppError.forbidden('Missing agent:run permission');
+
+    const agent = agents.get((req.params as any).id);
+    if (!agent || agent.tenantId !== ctx.tenantId) throw AppError.notFound('Agent');
+
+    agent.status = 'inactive';
+    agents.set(agent);
+    writeAudit(ctx, 'agent.delete', 'agent', agent.id, agent.businessId);
+    reply.send({ data: agent });
   });
 
   app.post('/:id/runs', async (req, reply) => {
@@ -119,7 +167,9 @@ export async function agentRoutes(app: FastifyInstance) {
     if (!agent || agent.tenantId !== ctx.tenantId) throw AppError.notFound('Agent');
 
     const runs = agentRuns.get(agent.id) ?? [];
-    reply.send({ data: runs });
+    const p = paginate(req.query);
+    const sliced = runs.slice(p.offset, p.offset + p.limit);
+    reply.send(paginatedResponse(sliced, runs.length, p));
   });
 
   app.get('/:id/runs/:runId', async (req, reply) => {

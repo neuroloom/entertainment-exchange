@@ -7,6 +7,7 @@ export const BOOKING_STATES = [
   'contracted',
   'completed',
   'cancelled',
+  'refunded',
 ] as const;
 
 export type BookingState = (typeof BOOKING_STATES)[number];
@@ -17,10 +18,11 @@ export const ALLOWED_TRANSITIONS: ReadonlyMap<BookingState, readonly BookingStat
   ['confirmed', ['contracted', 'cancelled', 'tentative']],
   ['contracted', ['completed', 'cancelled']],
   ['completed', []],
-  ['cancelled', []],
+  ['cancelled', ['refunded']],
+  ['refunded', []],
 ]);
 
-const TERMINAL_STATES: ReadonlySet<BookingState> = new Set(['completed', 'cancelled']);
+const TERMINAL_STATES: ReadonlySet<BookingState> = new Set(['completed', 'cancelled', 'refunded']);
 
 /**
  * A lightweight error class compatible with the API's AppError interface.

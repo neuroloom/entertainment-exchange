@@ -78,7 +78,15 @@ export async function rightsRoutes(app: FastifyInstance) {
   app.get('/anchors', async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
-    reply.send({ data: anchors.all(ctx.tenantId) });
+    const all = anchors.all(ctx.tenantId);
+    const limit = parseInt((req.query as any)?.limit, 10) || 0;
+    const offset = parseInt((req.query as any)?.offset, 10) || 0;
+    if (limit > 0) {
+      const page = all.slice(offset, offset + limit);
+      reply.send({ data: page, total: all.length, limit, offset });
+    } else {
+      reply.send({ data: all });
+    }
   });
 
   app.get('/anchors/:id', async (req, reply) => {
@@ -86,6 +94,30 @@ export async function rightsRoutes(app: FastifyInstance) {
     const a = anchors.get((req.params as any).id);
     if (!a || a.tenantId !== ctx.tenantId) throw AppError.notFound('LegalAnchor');
     reply.send({ data: a });
+  });
+
+  app.patch('/anchors/:id', async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    if (!ctx.actor.permissions.includes('rights:issue')) throw AppError.forbidden('Missing rights:issue permission');
+
+    const anchor = anchors.get((req.params as any).id);
+    if (!anchor || anchor.tenantId !== ctx.tenantId) throw AppError.notFound('LegalAnchor');
+
+    const body = z.object({
+      documentUri: z.string().min(1).optional(),
+      documentHash: z.string().min(1).optional(),
+      metadata: z.record(z.unknown()).optional(),
+    }).parse(req.body);
+
+    const updated = { ...anchor };
+    if (body.documentUri !== undefined) updated.documentUri = body.documentUri;
+    if (body.documentHash !== undefined) updated.documentHash = body.documentHash;
+    if (body.metadata !== undefined) updated.metadata = body.metadata;
+    anchors.set(updated);
+
+    writeAudit(ctx, 'anchor.update', 'legal_anchor', anchor.id, undefined, { changes: Object.keys(body) });
+    reply.send({ data: updated });
   });
 
   // ═══ Rights Assets ═══════════════════════════════════════════════════════════
@@ -110,7 +142,52 @@ export async function rightsRoutes(app: FastifyInstance) {
   app.get('/assets', async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
-    reply.send({ data: assets.all(ctx.tenantId) });
+    const all = assets.all(ctx.tenantId);
+    const limit = parseInt((req.query as any)?.limit, 10) || 0;
+    const offset = parseInt((req.query as any)?.offset, 10) || 0;
+    if (limit > 0) {
+      const page = all.slice(offset, offset + limit);
+      reply.send({ data: page, total: all.length, limit, offset });
+    } else {
+      reply.send({ data: all });
+    }
+  });
+
+  app.patch('/assets/:id', async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    if (!ctx.actor.permissions.includes('rights:issue')) throw AppError.forbidden('Missing rights:issue permission');
+
+    const asset = assets.get((req.params as any).id);
+    if (!asset || asset.tenantId !== ctx.tenantId) throw AppError.notFound('RightsAsset');
+
+    const body = z.object({
+      title: z.string().min(1).optional(),
+      metadata: z.record(z.unknown()).optional(),
+    }).parse(req.body);
+
+    const updated = { ...asset };
+    if (body.title !== undefined) updated.title = body.title;
+    if (body.metadata !== undefined) updated.metadata = body.metadata;
+    assets.set(updated);
+
+    writeAudit(ctx, 'asset.update', 'rights_asset', asset.id, asset.businessId, { changes: Object.keys(body) });
+    reply.send({ data: updated });
+  });
+
+  app.delete('/assets/:id', async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    if (!ctx.actor.permissions.includes('rights:issue')) throw AppError.forbidden('Missing rights:issue permission');
+
+    const asset = assets.get((req.params as any).id);
+    if (!asset || asset.tenantId !== ctx.tenantId) throw AppError.notFound('RightsAsset');
+
+    const archived = { ...asset, status: 'archived' };
+    assets.set(archived);
+
+    writeAudit(ctx, 'asset.archive', 'rights_asset', asset.id, asset.businessId);
+    reply.send({ data: archived });
   });
 
   app.get('/assets/:id', async (req, reply) => {
@@ -164,7 +241,15 @@ export async function rightsRoutes(app: FastifyInstance) {
   app.get('/passports', async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
-    reply.send({ data: passports.all(ctx.tenantId) });
+    const all = passports.all(ctx.tenantId);
+    const limit = parseInt((req.query as any)?.limit, 10) || 0;
+    const offset = parseInt((req.query as any)?.offset, 10) || 0;
+    if (limit > 0) {
+      const page = all.slice(offset, offset + limit);
+      reply.send({ data: page, total: all.length, limit, offset });
+    } else {
+      reply.send({ data: all });
+    }
   });
 
   app.get('/passports/:id', async (req, reply) => {

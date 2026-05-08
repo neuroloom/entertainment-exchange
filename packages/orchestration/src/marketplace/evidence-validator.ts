@@ -11,7 +11,7 @@ export type EvidenceTier =
   | 'platform_verified'
   | 'acquisition_ready';
 
-// ─── Validation Result ────────────────────────────────────────────────────────
+// ─── Validation Result ─────────────────────────────────────────────────────────
 
 export interface EvidenceValidationResult {
   valid: boolean;
@@ -19,7 +19,20 @@ export interface EvidenceValidationResult {
   reasons: string[];
 }
 
-// ─── Tier Requirements ────────────────────────────────────────────────────────
+// ─── Document shape for structured validation ──────────────────────────────────
+
+export interface EvidenceDocument {
+  id?: string;
+  hash?: string;
+  expiryDate?: string;
+  issuerName?: string;
+  issuingAuthority?: string;
+  ownerName?: string;
+  dateSigned?: string;
+  metadata?: Record<string, unknown>;
+}
+
+// ─── Tier Requirements ─────────────────────────────────────────────────────────
 
 interface TierRequirement {
   minDocuments: number;
@@ -131,6 +144,183 @@ export class EvidenceValidator {
       missingDocuments,
       reasons,
     };
+  }
+
+  // ─── Structured document validation pipeline ──────────────────────────────
+
+  /**
+   * Validate documents with full structured checks (expiry, issuer, fraud).
+   * Called from the main validate flow for tiers requiring deeper scrutiny.
+   */
+  validateDocuments(tier: EvidenceTier, documents: EvidenceDocument[]): EvidenceValidationResult {
+    const reasons: string[] = [];
+    const missingDocuments: string[] = [];
+
+    // Numeric document count
+    const req = TIER_REQUIREMENTS[tier];
+    if (documents.length < req.minDocuments) {
+      const needed = req.minDocuments - documents.length;
+      reasons.push(
+        `Insufficient documents: ${documents.length} provided, ${req.minDocuments} required (${needed} missing)`,
+      );
+      for (let i = 0; i < needed; i++) {
+        missingDocuments.push(`required_document_${documents.length + i + 1}`);
+      }
+    }
+
+    // Expiry validation on each document
+    for (const doc of documents) {
+      const expiryCheck = this.validateExpiry(doc);
+      if (!expiryCheck.valid) {
+        if (!reasons.some(r => r.includes('expired'))) {
+          reasons.push(`One or more documents are expired`);
+        }
+        if (doc.id && !missingDocuments.includes(doc.id)) {
+          missingDocuments.push(doc.id);
+        }
+      }
+    }
+
+    // Issuer validation
+    if (req.requireHashVerification) {
+      for (const doc of documents) {
+        const issuerCheck = this.validateIssuer(doc);
+        if (!issuerCheck.valid) {
+          reasons.push(`Issuer validation failed: ${issuerCheck.reason}`);
+          if (doc.id && !missingDocuments.includes(doc.id)) {
+            missingDocuments.push(doc.id);
+          }
+        }
+      }
+    }
+
+    // Fraud indicator scan
+    const fraudIndicators = this.detectFraudIndicators(documents);
+    for (const indicator of fraudIndicators) {
+      if (!reasons.includes(indicator)) {
+        reasons.push(indicator);
+      }
+    }
+
+    return {
+      valid: reasons.length === 0,
+      missingDocuments,
+      reasons,
+    };
+  }
+
+  // ─── validateExpiry: checks if a document has an expiry date and it hasn't passed
+
+  validateExpiry(document: EvidenceDocument): { valid: boolean; reason?: string } {
+    if (!document.expiryDate) {
+      // No expiry date set — document is perpetual; considered valid for expiry check
+      return { valid: true };
+    }
+
+    const expiry = new Date(document.expiryDate);
+    if (isNaN(expiry.getTime())) {
+      return { valid: false, reason: `Invalid expiry date format: ${document.expiryDate}` };
+    }
+
+    if (expiry < new Date()) {
+      return {
+        valid: false,
+        reason: `Document has expired on ${expiry.toISOString()}`,
+      };
+    }
+
+    return { valid: true };
+  }
+
+  // ─── validateIssuer: checks that a document has issuer name and issuing authority
+
+  validateIssuer(document: EvidenceDocument): { valid: boolean; reason?: string } {
+    const missingFields: string[] = [];
+
+    if (!document.issuerName || document.issuerName.trim().length === 0) {
+      missingFields.push('issuerName');
+    }
+    if (!document.issuingAuthority || document.issuingAuthority.trim().length === 0) {
+      missingFields.push('issuingAuthority');
+    }
+
+    if (missingFields.length > 0) {
+      return {
+        valid: false,
+        reason: `Missing issuer information: ${missingFields.join(', ')}`,
+      };
+    }
+
+    return { valid: true };
+  }
+
+  // ─── detectFraudIndicators: scans document set for anomalies ────────────────
+
+  detectFraudIndicators(documents: EvidenceDocument[]): string[] {
+    const indicators: string[] = [];
+
+    // 1. Mismatched owner names across documents
+    const ownerNames = documents
+      .map(d => d.ownerName)
+      .filter((n): n is string => typeof n === 'string' && n.trim().length > 0);
+    if (ownerNames.length >= 2) {
+      const unique = [...new Set(ownerNames.map(n => n.toLowerCase().trim()))];
+      if (unique.length > 1) {
+        indicators.push(
+          `Mismatched owner names across documents: ${unique.join(' vs ')}`,
+        );
+      }
+    }
+
+    // 2. Inconsistent dates (dateSigned after expiryDate, or future dates > 1 year)
+    for (const doc of documents) {
+      if (doc.dateSigned && doc.expiryDate) {
+        const signed = new Date(doc.dateSigned);
+        const expiry = new Date(doc.expiryDate);
+        if (!isNaN(signed.getTime()) && !isNaN(expiry.getTime())) {
+          if (signed > expiry) {
+            indicators.push(
+              `Document signed after expiry: signed ${doc.dateSigned}, expires ${doc.expiryDate}`,
+            );
+          }
+        }
+      }
+
+      // Suspiciously far-future dates
+      if (doc.dateSigned) {
+        const signed = new Date(doc.dateSigned);
+        if (!isNaN(signed.getTime())) {
+          const oneYearFromNow = new Date();
+          oneYearFromNow.setFullYear(oneYearFromNow.getFullYear() + 1);
+          if (signed > oneYearFromNow) {
+            indicators.push(
+              `Suspicious future date: signed ${doc.dateSigned} is more than 1 year in the future`,
+            );
+          }
+        }
+      }
+    }
+
+    // 3. Duplicate hashes (same document submitted multiple times as different evidence)
+    const hashes = documents
+      .map(d => d.hash)
+      .filter((h): h is string => typeof h === 'string' && h.trim().length > 0);
+
+    if (hashes.length >= 2) {
+      const seen = new Map<string, number>();
+      hashes.forEach((h, idx) => {
+        if (seen.has(h)) {
+          const firstIdx = seen.get(h)!;
+          indicators.push(
+            `Duplicate hash detected: documents at indices ${firstIdx} and ${idx} share hash ${h.slice(0, 12)}...`,
+          );
+        } else {
+          seen.set(h, idx);
+        }
+      });
+    }
+
+    return indicators;
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────

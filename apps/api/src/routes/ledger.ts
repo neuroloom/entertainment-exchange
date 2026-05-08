@@ -64,6 +64,19 @@ export async function ledgerRoutes(app: FastifyInstance) {
     reply.send({ data: accounts.get(businessId) ?? [] });
   });
 
+  app.get('/accounts/:id', async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    const businessId = (req.query as any)?.businessId;
+    if (!businessId) throw AppError.invalid('businessId query parameter required');
+
+    seedDefaultAccounts(businessId, ctx.tenantId);
+    const accts = accounts.get(businessId) ?? [];
+    const account = accts.find((a: any) => a.id === (req.params as any).id);
+    if (!account) throw AppError.notFound('Account');
+    reply.send({ data: account });
+  });
+
   app.post('/journal', async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
@@ -112,8 +125,15 @@ export async function ledgerRoutes(app: FastifyInstance) {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     const businessId = (req.query as any)?.businessId;
-    const filtered = journalStore.listJournals(ctx.tenantId, businessId);
-    reply.send({ data: filtered });
+    const all = journalStore.listJournals(ctx.tenantId, businessId);
+    const limit = parseInt((req.query as any)?.limit, 10) || 0;
+    const offset = parseInt((req.query as any)?.offset, 10) || 0;
+    if (limit > 0) {
+      const page = all.slice(offset, offset + limit);
+      reply.send({ data: page, total: all.length, limit, offset });
+    } else {
+      reply.send({ data: all });
+    }
   });
 
   app.get('/journals/:id', async (req, reply) => {
@@ -122,6 +142,34 @@ export async function ledgerRoutes(app: FastifyInstance) {
     if (!j || j.tenantId !== ctx.tenantId) throw AppError.notFound('Journal');
     const journalEntries = journalStore.getEntries(j.id);
     reply.send({ data: { journal: j, entries: journalEntries } });
+  });
+
+  app.get('/entries', async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    const journalId = (req.query as any)?.journalId;
+
+    let filtered: any[];
+    if (journalId) {
+      // Validate the journal exists and belongs to this tenant
+      const j = journalStore.getJournal(journalId);
+      if (!j || j.tenantId !== ctx.tenantId) throw AppError.notFound('Journal');
+      filtered = journalStore.getEntries(journalId);
+    } else {
+      // List all entries for this tenant
+      const allJournals = journalStore.listJournals(ctx.tenantId);
+      const tenantJournalIds = new Set(allJournals.map(j => j.id));
+      filtered = journalStore.entries.filter(e => tenantJournalIds.has(e.journalId));
+    }
+
+    const limit = parseInt((req.query as any)?.limit, 10) || 0;
+    const offset = parseInt((req.query as any)?.offset, 10) || 0;
+    if (limit > 0) {
+      const page = filtered.slice(offset, offset + limit);
+      reply.send({ data: page, total: filtered.length, limit, offset });
+    } else {
+      reply.send({ data: filtered });
+    }
   });
 
   app.get('/revenue', async (req, reply) => {

@@ -44,6 +44,22 @@ export async function buildServer() {
   // Error handler — directly on root so ALL children inherit
   await errorHandlerPlugin(app);
 
+  // CORS — allow configured origins
+  const corsOrigins = (process.env.CORS_ORIGINS ?? '').split(',').filter(Boolean);
+  app.addHook('onRequest', async (req, reply) => {
+    const origin = req.headers.origin;
+    if (!origin) return;
+    const allowed = corsOrigins.length === 0 || corsOrigins.includes(origin);
+    if (!allowed) return;
+    reply.header('Access-Control-Allow-Origin', origin);
+    reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+    reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Tenant-Id, X-Business-Id, X-Actor-Id, X-Actor-Type, X-Actor-Permissions, X-Trace-Id');
+    reply.header('Access-Control-Max-Age', '86400');
+    if (req.method === 'OPTIONS') {
+      reply.status(204).send();
+    }
+  });
+
   // Auth plugin — reads Authorization: Bearer and populates ctx
   await authPlugin(app);
 
