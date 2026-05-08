@@ -77,7 +77,30 @@ export async function ledgerRoutes(app: FastifyInstance) {
     reply.send({ data: account });
   });
 
-  app.post('/journal', async (req, reply) => {
+  app.post('/journal', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['businessId', 'entries'],
+        properties: {
+          businessId: { type: 'string', format: 'uuid' },
+          memo: { type: 'string' },
+          entries: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['accountId', 'direction', 'amountCents'],
+              properties: {
+                accountId: { type: 'string', format: 'uuid' },
+                direction: { type: 'string', enum: ['debit', 'credit'] },
+                amountCents: { type: 'integer', minimum: 1 },
+              },
+            },
+          },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('payment:create')) throw AppError.forbidden('Missing payment:create permission');
@@ -190,7 +213,17 @@ export async function ledgerRoutes(app: FastifyInstance) {
     reply.send({ data: recognizable });
   });
 
-  app.post('/revenue/recognize', async (req, reply) => {
+  app.post('/revenue/recognize', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['bookingId'],
+        properties: {
+          bookingId: { type: 'string', format: 'uuid' },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('payment:create')) throw AppError.forbidden('Missing payment:create permission');
@@ -225,7 +258,22 @@ export async function ledgerRoutes(app: FastifyInstance) {
     reply.status(201).send({ data: { journal, entries: journalEntries, recognition: scheduled } });
   });
 
-  app.post('/revenue', async (req, reply) => {
+  app.post('/revenue', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['businessId', 'eventType', 'amountCents'],
+        properties: {
+          businessId: { type: 'string', format: 'uuid' },
+          eventType: { type: 'string', minLength: 1 },
+          amountCents: { type: 'integer', minimum: 0 },
+          referenceType: { type: 'string' },
+          referenceId: { type: 'string', format: 'uuid' },
+          recognitionDate: { type: 'string' },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('payment:create')) throw AppError.forbidden('Missing payment:create permission');

@@ -42,7 +42,22 @@ function writeAudit(ctx: any, action: string, resourceType: string, resourceId: 
 }
 
 export async function agentRoutes(app: FastifyInstance) {
-  app.post('/', async (req, reply) => {
+  app.post('/', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['name', 'role'],
+        properties: {
+          name: { type: 'string', minLength: 1 },
+          role: { type: 'string', minLength: 1 },
+          autonomyLevel: { type: 'integer', minimum: 0, maximum: 5 },
+          budgetDailyCents: { type: 'integer', minimum: 0 },
+          businessId: { type: 'string', format: 'uuid' },
+          metadata: { type: 'object', additionalProperties: true },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('agent:run')) throw AppError.forbidden('Missing agent:run permission');
@@ -82,7 +97,20 @@ export async function agentRoutes(app: FastifyInstance) {
   });
 
   // Sprint 3b: PATCH /agents/:id — update agent name, role, autonomyLevel, budgetDailyCents
-  app.patch('/:id', async (req, reply) => {
+  app.patch('/:id', {
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', minLength: 1 },
+          role: { type: 'string', minLength: 1 },
+          autonomyLevel: { type: 'integer', minimum: 0, maximum: 5 },
+          budgetDailyCents: { type: 'integer', minimum: 0 },
+        },
+        additionalProperties: false,
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('agent:run')) throw AppError.forbidden('Missing agent:run permission');
@@ -117,7 +145,18 @@ export async function agentRoutes(app: FastifyInstance) {
     reply.send({ data: agent });
   });
 
-  app.post('/:id/runs', async (req, reply) => {
+  app.post('/:id/runs', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['goal'],
+        properties: {
+          goal: { type: 'string', minLength: 1 },
+          metadata: { type: 'object', additionalProperties: true },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('agent:run')) throw AppError.forbidden('Missing agent:run permission');

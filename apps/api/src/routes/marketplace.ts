@@ -82,7 +82,22 @@ function findTenantDeal(dealId: string, tenantId: string): { deal: any; listing:
 }
 
 export async function marketplaceRoutes(app: FastifyInstance) {
-  app.post('/listings', async (req, reply) => {
+  app.post('/listings', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['sellerBusinessId', 'listingType', 'title'],
+        properties: {
+          sellerBusinessId: { type: 'string', format: 'uuid' },
+          listingType: { type: 'string', minLength: 1 },
+          title: { type: 'string', minLength: 1 },
+          askingPriceCents: { type: 'integer', minimum: 0 },
+          evidenceTier: { type: 'string', enum: ['self_reported', 'document_supported', 'platform_verified', 'acquisition_ready'] },
+          metadata: { type: 'object', additionalProperties: true },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('listing:publish')) throw AppError.forbidden('Missing listing:publish permission');
@@ -120,7 +135,19 @@ export async function marketplaceRoutes(app: FastifyInstance) {
   });
 
   // Sprint 3b: PATCH /marketplace/listings/:id — update title, askingPriceCents, metadata (draft only)
-  app.patch('/listings/:id', async (req, reply) => {
+  app.patch('/listings/:id', {
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', minLength: 1 },
+          askingPriceCents: { type: 'integer', minimum: 0 },
+          metadata: { type: 'object', additionalProperties: true },
+        },
+        additionalProperties: false,
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('listing:publish')) throw AppError.forbidden('Missing listing:publish permission');
@@ -174,7 +201,18 @@ export async function marketplaceRoutes(app: FastifyInstance) {
     reply.send({ data: listing });
   });
 
-  app.post('/deals', async (req, reply) => {
+  app.post('/deals', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['listingId'],
+        properties: {
+          listingId: { type: 'string' },
+          buyerUserId: { type: 'string' },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('deal:close')) throw AppError.forbidden('Missing deal:close permission');
@@ -233,7 +271,17 @@ export async function marketplaceRoutes(app: FastifyInstance) {
   });
 
   // Sprint 3b: PATCH /marketplace/deals/:id — update deal status with validated transitions
-  app.patch('/deals/:id', async (req, reply) => {
+  app.patch('/deals/:id', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['status'],
+        properties: {
+          status: { type: 'string', enum: ['negotiating', 'agreed', 'escrow_funded', 'completed'] },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('deal:close')) throw AppError.forbidden('Missing deal:close permission');
@@ -299,7 +347,22 @@ export async function marketplaceRoutes(app: FastifyInstance) {
   });
 
   // POST /marketplace/deals/:id/transition — advance deal state with guard validation
-  app.post('/deals/:id/transition', async (req, reply) => {
+  app.post('/deals/:id/transition', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['toStatus'],
+        properties: {
+          toStatus: { type: 'string', enum: [
+            'created', 'offer_submitted', 'offer_accepted', 'due_diligence',
+            'terms_negotiated', 'terms_agreed', 'escrow_funded', 'legal_review',
+            'closing', 'completed', 'disputed', 'resolved',
+            'rejected', 'cancelled', 'expired',
+          ] },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('deal:close')) throw AppError.forbidden('Missing deal:close permission');

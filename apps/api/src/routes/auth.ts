@@ -70,7 +70,18 @@ const refreshTokens = new Map<string, { userId: string; tenantId: string; expire
 // ── Routes ──────────────────────────────────────────────────────────────────
 
 export async function authRoutes(app: FastifyInstance) {
-  app.post('/register', async (req, reply) => {
+  app.post('/register', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['email', 'password'],
+        properties: {
+          email: { type: 'string', format: 'email' },
+          password: { type: 'string', minLength: 8 },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const body = RegisterSchema.parse(req.body);
 
     // Password strength check
@@ -110,7 +121,18 @@ export async function authRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post('/login', async (req, reply) => {
+  app.post('/login', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['email', 'password'],
+        properties: {
+          email: { type: 'string' },
+          password: { type: 'string' },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const { email, password } = LoginSchema.parse(req.body);
     const user = users.find(u => u.email === email);
     if (!user) throw AppError.unauthenticated('Invalid credentials');
@@ -136,7 +158,17 @@ export async function authRoutes(app: FastifyInstance) {
     reply.send({ data: { token, refreshToken, userId: user.id, tenantId: user.tenantId, role: user.role } });
   });
 
-  app.post('/refresh', async (req, reply) => {
+  app.post('/refresh', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['refreshToken'],
+        properties: {
+          refreshToken: { type: 'string' },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const { refreshToken } = RefreshSchema.parse(req.body);
     const stored = refreshTokens.get(refreshToken);
     if (!stored || stored.expiresAt < Date.now()) {

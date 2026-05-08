@@ -47,7 +47,25 @@ function writeAudit(ctx: any, action: string, resourceType: string, resourceId: 
 }
 
 export async function bookingRoutes(app: FastifyInstance) {
-  app.post('/bookings', async (req, reply) => {
+  app.post('/bookings', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['eventType', 'eventDate', 'startTime', 'endTime'],
+        properties: {
+          eventType: { type: 'string', minLength: 1 },
+          eventName: { type: 'string' },
+          eventDate: { type: 'string', minLength: 1 },
+          startTime: { type: 'string', minLength: 1 },
+          endTime: { type: 'string', minLength: 1 },
+          clientId: { type: 'string', format: 'uuid' },
+          artistId: { type: 'string', format: 'uuid' },
+          venueId: { type: 'string', format: 'uuid' },
+          quotedAmountCents: { type: 'integer', minimum: 0 },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('booking:create')) throw AppError.forbidden('Missing booking:create permission');
@@ -109,7 +127,17 @@ export async function bookingRoutes(app: FastifyInstance) {
     reply.send({ data: b });
   });
 
-  app.patch('/bookings/:id/status', async (req, reply) => {
+  app.patch('/bookings/:id/status', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['status'],
+        properties: {
+          status: { type: 'string', enum: ['inquiry', 'tentative', 'confirmed', 'contracted', 'completed', 'cancelled', 'refunded'] },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('booking:confirm')) throw AppError.forbidden('Missing booking:confirm permission');

@@ -10,7 +10,7 @@ import { metricsPlugin } from './plugins/metrics.plugin.js';
 import { healthPlugin } from './plugins/health.plugin.js';
 import { sanitizePlugin } from './plugins/sanitize.plugin.js';
 import { authPlugin } from './plugins/auth.plugin.js';
-import { hydrateAllStores, migrateForward } from './services/repo.js';
+import { hydrateAllStores, migrateForward, setCurrentTraceId } from './services/repo.js';
 import { authRoutes } from './routes/auth.js';
 import { businessRoutes } from './routes/business.js';
 import { bookingRoutes } from './routes/booking.js';
@@ -26,9 +26,10 @@ export async function buildServer() {
   app.decorateRequest('ctx', null as unknown as RequestContext);
   app.addHook('onRequest', async (req) => {
     const perms = (req.headers['x-actor-permissions'] as string)?.split(',').map(s => s.trim()) ?? [];
+    const traceId = (req.headers['x-trace-id'] as string) ?? uuid();
     (req as any).ctx = {
       requestId: uuid(),
-      traceId: (req.headers['x-trace-id'] as string) ?? uuid(),
+      traceId,
       tenantId: (req.headers['x-tenant-id'] as string) ?? '',
       businessId: (req.headers['x-business-id'] as string) ?? undefined,
       actor: {
@@ -39,6 +40,19 @@ export async function buildServer() {
         permissions: perms,
       },
     };
+    setCurrentTraceId(traceId);
+  });
+
+  // Response hook — emit trace ID and log request duration
+  app.addHook('onResponse', async (req, reply) => {
+    const ctx = (req as any).ctx as RequestContext | undefined;
+    if (ctx?.traceId) {
+      reply.header('X-Trace-Id', ctx.traceId);
+    }
+    const duration = Math.round(reply.elapsedTime);
+    if (duration > 1000) {
+      app.log.warn({ traceId: ctx?.traceId, tenantId: ctx?.tenantId, method: req.method, url: req.url, statusCode: reply.statusCode, responseTime: duration }, 'slow request');
+    }
   });
 
   // Error handler — directly on root so ALL children inherit

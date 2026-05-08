@@ -26,6 +26,18 @@ interface PoolLike { query: (text: string, params?: unknown[]) => Promise<{ rows
 let _pool: PoolLike | null = null;
 let _poolInit = false;
 
+// ── Trace ID for PG query correlation ──────────────────────────────────────
+
+let _currentTraceId = '';
+
+export function setCurrentTraceId(id: string): void {
+  _currentTraceId = id;
+}
+
+export function getCurrentTraceId(): string {
+  return _currentTraceId;
+}
+
 async function getPool(): Promise<PoolLike | null> {
   if (_pool) return _pool;
   if (_poolInit) return null;
@@ -139,10 +151,13 @@ export class MemoryStore<T = any> {
       const keys = Object.keys(mapped);
       const vals = keys.map(k => mapped[k]);
       const placeholders = vals.map((_, i) => `$${i + 1}`);
+      const start = Date.now();
       await pool.query(
-        `INSERT INTO ${this.tableName} (${keys.join(', ')}) VALUES (${placeholders.join(', ')}) ON CONFLICT (id) DO UPDATE SET ${keys.filter(k => k !== 'id').map((k, i) => `${k} = EXCLUDED.${k}`).join(', ')}`,
+        `/* trace_id: ${_currentTraceId} */ INSERT INTO ${this.tableName} (${keys.join(', ')}) VALUES (${placeholders.join(', ')}) ON CONFLICT (id) DO UPDATE SET ${keys.filter(k => k !== 'id').map((k, i) => `${k} = EXCLUDED.${k}`).join(', ')}`,
         vals,
       );
+      const duration = Date.now() - start;
+      if (duration > 100) console.warn(`[pg] slow query: ${duration}ms — INSERT ${this.tableName}`);
     } catch { /* PG unavailable — in-memory still works */ }
   }
 }
@@ -184,10 +199,13 @@ export class AuditStore {
     if (!pool) return;
     try {
       const { id, tenantId, businessId, actorType, actorId, action, resourceType, resourceId, metadata, createdAt } = event;
+      const start = Date.now();
       await pool.query(
-        `INSERT INTO audit_events (id, tenant_id, business_id, actor_type, actor_id, action, resource_type, resource_id, metadata, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO NOTHING`,
+        `/* trace_id: ${_currentTraceId} */ INSERT INTO audit_events (id, tenant_id, business_id, actor_type, actor_id, action, resource_type, resource_id, metadata, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO NOTHING`,
         [id, tenantId, businessId ?? null, actorType, actorId, action, resourceType, resourceId, JSON.stringify(metadata ?? {}), createdAt],
       );
+      const duration = Date.now() - start;
+      if (duration > 100) console.warn(`[pg] slow query: ${duration}ms — INSERT audit_events`);
     } catch { /* PG unavailable */ }
   }
 }
@@ -233,15 +251,21 @@ export class JournalStore {
     const pool = await getPool();
     if (!pool) return;
     try {
+      const start = Date.now();
       await pool.query(
-        `INSERT INTO ledger_journals (id, tenant_id, business_id, memo, reference_type, reference_id, occurred_at, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
+        `/* trace_id: ${_currentTraceId} */ INSERT INTO ledger_journals (id, tenant_id, business_id, memo, reference_type, reference_id, occurred_at, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
         [j.id, j.tenantId, j.businessId, j.memo, j.referenceType, j.referenceId, j.occurredAt, j.createdAt],
       );
+      const journalDuration = Date.now() - start;
+      if (journalDuration > 100) console.warn(`[pg] slow query: ${journalDuration}ms — INSERT ledger_journals`);
       for (const entry of e) {
+        const entryStart = Date.now();
         await pool.query(
-          `INSERT INTO ledger_entries (id, tenant_id, journal_id, account_id, direction, amount_cents) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING`,
+          `/* trace_id: ${_currentTraceId} */ INSERT INTO ledger_entries (id, tenant_id, journal_id, account_id, direction, amount_cents) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING`,
           [entry.id, j.tenantId, j.id, entry.accountId, entry.direction, entry.amountCents],
         );
+        const entryDuration = Date.now() - entryStart;
+        if (entryDuration > 100) console.warn(`[pg] slow query: ${entryDuration}ms — INSERT ledger_entries`);
       }
     } catch { /* PG unavailable */ }
   }

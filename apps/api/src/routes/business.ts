@@ -54,7 +54,19 @@ export function getBusinessAccountMap(businessId: string): Map<string, string> {
 }
 
 export async function businessRoutes(app: FastifyInstance) {
-  app.post('/businesses', async (req, reply) => {
+  app.post('/businesses', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string', minLength: 1 },
+          vertical: { type: 'string' },
+          legalName: { type: 'string' },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('business:create')) throw AppError.forbidden('Missing business:create permission');
@@ -117,7 +129,19 @@ export async function businessRoutes(app: FastifyInstance) {
     });
   });
 
-  app.put('/businesses/:id', async (req, reply) => {
+  app.put('/businesses/:id', {
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', minLength: 1 },
+          vertical: { type: 'string' },
+          legalName: { type: 'string' },
+        },
+        additionalProperties: false,
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('business:manage')) throw AppError.forbidden('Missing business:manage permission');

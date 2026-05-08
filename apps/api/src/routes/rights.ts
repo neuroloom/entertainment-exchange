@@ -58,7 +58,20 @@ function writeAudit(ctx: any, action: string, resourceType: string, resourceId: 
 export async function rightsRoutes(app: FastifyInstance) {
   // ═══ Legal Anchors ══════════════════════════════════════════════════════════
 
-  app.post('/anchors', async (req, reply) => {
+  app.post('/anchors', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['documentUri', 'documentHash', 'documentType'],
+        properties: {
+          documentUri: { type: 'string', minLength: 1 },
+          documentHash: { type: 'string', minLength: 1 },
+          documentType: { type: 'string', minLength: 1 },
+          metadata: { type: 'object', additionalProperties: true },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('rights:issue')) throw AppError.forbidden('Missing rights:issue permission');
@@ -96,7 +109,19 @@ export async function rightsRoutes(app: FastifyInstance) {
     reply.send({ data: a });
   });
 
-  app.patch('/anchors/:id', async (req, reply) => {
+  app.patch('/anchors/:id', {
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          documentUri: { type: 'string', minLength: 1 },
+          documentHash: { type: 'string', minLength: 1 },
+          metadata: { type: 'object', additionalProperties: true },
+        },
+        additionalProperties: false,
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('rights:issue')) throw AppError.forbidden('Missing rights:issue permission');
@@ -122,7 +147,20 @@ export async function rightsRoutes(app: FastifyInstance) {
 
   // ═══ Rights Assets ═══════════════════════════════════════════════════════════
 
-  app.post('/assets', async (req, reply) => {
+  app.post('/assets', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['businessId', 'assetType', 'title'],
+        properties: {
+          businessId: { type: 'string', format: 'uuid' },
+          assetType: { type: 'string', minLength: 1 },
+          title: { type: 'string', minLength: 1 },
+          metadata: { type: 'object', additionalProperties: true },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('rights:issue')) throw AppError.forbidden('Missing rights:issue permission');
@@ -153,7 +191,18 @@ export async function rightsRoutes(app: FastifyInstance) {
     }
   });
 
-  app.patch('/assets/:id', async (req, reply) => {
+  app.patch('/assets/:id', {
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', minLength: 1 },
+          metadata: { type: 'object', additionalProperties: true },
+        },
+        additionalProperties: false,
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('rights:issue')) throw AppError.forbidden('Missing rights:issue permission');
@@ -212,7 +261,21 @@ export async function rightsRoutes(app: FastifyInstance) {
 
   // ═══ Passports (wired to PassportVerifier) ══════════════════════════════════
 
-  app.post('/passports', async (req, reply) => {
+  app.post('/passports', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['rightsAssetId', 'legalAnchorId', 'passportType'],
+        properties: {
+          rightsAssetId: { type: 'string', format: 'uuid' },
+          legalAnchorId: { type: 'string', format: 'uuid' },
+          passportType: { type: 'string', minLength: 1 },
+          metadata: { type: 'object', additionalProperties: true },
+          expiresAt: { type: 'string' },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('rights:issue')) throw AppError.forbidden('Missing rights:issue permission');
@@ -288,7 +351,16 @@ export async function rightsRoutes(app: FastifyInstance) {
 
   // ─── Renew passport ─────────────────────────────────────────────────────────
 
-  app.post('/passports/:id/renew', async (req, reply) => {
+  app.post('/passports/:id/renew', {
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          expiresAt: { type: 'string' },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('rights:issue')) throw AppError.forbidden('Missing rights:issue permission');
