@@ -1,0 +1,13 @@
+node_modules
+dist
+.git
+.omc
+.claude
+.claude-flow
+*.log
+.env
+.env.local
+coverage
+__tests__
+*.test.ts
+*.spec.ts
