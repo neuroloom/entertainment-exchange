@@ -10,6 +10,7 @@ import { metricsPlugin } from './plugins/metrics.plugin.js';
 import { healthPlugin } from './plugins/health.plugin.js';
 import { sanitizePlugin } from './plugins/sanitize.plugin.js';
 import { authPlugin } from './plugins/auth.plugin.js';
+import { hydrateAllStores, migrateForward } from './services/repo.js';
 import { authRoutes } from './routes/auth.js';
 import { businessRoutes } from './routes/business.js';
 import { bookingRoutes } from './routes/booking.js';
@@ -54,6 +55,15 @@ export async function buildServer() {
   await loggerPlugin(app);
   await metricsPlugin(app);
   await healthPlugin(app);
+
+  // PG migrations + hydration — must run before routes register stores
+  try {
+    const applied = await migrateForward();
+    if (applied.length > 0) app.log.info(`Migrations applied: ${applied.join(', ')}`);
+  } catch (err) {
+    app.log.warn(`Migrations skipped (no PG?): ${(err as Error).message}`);
+  }
+  await hydrateAllStores();
 
   // Routes — domain boundaries preserved per service boundary spec
   app.register(authRoutes, { prefix: '/api/v1/auth' });

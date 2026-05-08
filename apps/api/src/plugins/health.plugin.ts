@@ -1,5 +1,6 @@
-// Health plugin — enhanced health check endpoint
+// Health plugin — enhanced health check endpoint with PG ping
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { pingPg } from '../services/repo.js';
 
 interface CheckResult {
   status: 'ok' | 'degraded' | 'unhealthy';
@@ -12,71 +13,32 @@ interface CheckResult {
 
 export async function healthPlugin(app: FastifyInstance) {
   const startTime = Date.now();
-
-  // Memory limits: warn at 250MB, critical at 500MB heap used
   const MEMORY_WARN_BYTES = 250 * 1024 * 1024;
   const MEMORY_CRITICAL_BYTES = 500 * 1024 * 1024;
 
   app.get('/health', { logLevel: 'warn' }, async (_req: FastifyRequest, reply: FastifyReply) => {
     const uptime = (Date.now() - startTime) / 1000;
-
-    // Memory check
     const heapUsed = process.memoryUsage().heapUsed;
+
     let memoryStatus: 'ok' | 'warn' | 'critical' = 'ok';
-    if (heapUsed > MEMORY_CRITICAL_BYTES) {
-      memoryStatus = 'critical';
-    } else if (heapUsed > MEMORY_WARN_BYTES) {
-      memoryStatus = 'warn';
-    }
+    if (heapUsed > MEMORY_CRITICAL_BYTES) memoryStatus = 'critical';
+    else if (heapUsed > MEMORY_WARN_BYTES) memoryStatus = 'warn';
 
-    // DB check — graceful degradation, do not crash if DB is unavailable
-    let dbStatus: 'ok' | 'error' = 'ok';
-    let dbMessage: string | undefined;
-    try {
-      // Check if the app has a db decorator (assumes db plugin sets app.decorate('db', ...))
-      const db = (app as any).db;
-      if (db) {
-        // Try a simple query or ping
-        if (typeof db.raw === 'function') {
-          await db.raw('SELECT 1');
-        } else if (typeof db.query === 'function') {
-          await db.query('SELECT 1');
-        } else if (typeof db.ping === 'function') {
-          await db.ping();
-        } else {
-          // DB object exists but has no known method — assume it's configured
-          dbStatus = 'ok';
-        }
-      }
-      // If no db decorator, just report ok (no database configured)
-    } catch (err) {
-      dbStatus = 'error';
-      dbMessage = err instanceof Error ? err.message : 'Database connection failed';
-    }
+    const pgOk = await pingPg();
+    const dbStatus: 'ok' | 'error' = pgOk ? 'ok' : 'error';
+    const dbMessage = pgOk ? undefined : 'PostgreSQL unreachable';
 
-    // Determine overall status
-    let overallStatus: 'ok' | 'degraded' = 'ok';
-    if (dbStatus === 'error' || memoryStatus === 'critical') {
-      overallStatus = 'degraded';
-    }
+    const overallStatus = (dbStatus === 'error' || memoryStatus === 'critical') ? 'degraded' : 'ok';
 
     const result: CheckResult = {
       status: overallStatus,
       uptime: Math.round(uptime),
       checks: {
-        db: {
-          status: dbStatus,
-          ...(dbMessage ? { message: dbMessage } : {}),
-        },
-        memory: {
-          status: memoryStatus,
-          usageBytes: heapUsed,
-          limitBytes: MEMORY_CRITICAL_BYTES,
-        },
+        db: { status: dbStatus, ...(dbMessage ? { message: dbMessage } : {}) },
+        memory: { status: memoryStatus, usageBytes: heapUsed, limitBytes: MEMORY_CRITICAL_BYTES },
       },
     };
 
-    const statusCode = overallStatus === 'degraded' ? 503 : 200;
-    return reply.status(statusCode).send(result);
+    return reply.status(overallStatus === 'degraded' ? 503 : 200).send(result);
   });
 }
