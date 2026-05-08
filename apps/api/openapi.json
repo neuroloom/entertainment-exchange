@@ -1,0 +1,605 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Entertainment Business Exchange API",
+    "version": "1.0.0",
+    "description": "Multi-tenant platform for entertainment booking, rights management, agent marketplace, and double-entry ledger."
+  },
+  "servers": [{ "url": "http://localhost:3000/api/v1", "description": "Local development" }],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" },
+      "tenantId": { "type": "apiKey", "in": "header", "name": "X-Tenant-ID" }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string" },
+              "message": { "type": "string" },
+              "requestId": { "type": "string" }
+            }
+          }
+        }
+      },
+      "PaginatedResponse": {
+        "type": "object",
+        "properties": {
+          "data": { "type": "array", "items": {} },
+          "total": { "type": "integer" },
+          "limit": { "type": "integer" },
+          "offset": { "type": "integer" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/auth/register": {
+      "post": {
+        "summary": "Register a new user and tenant",
+        "tags": ["Auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password"],
+                "properties": {
+                  "email": { "type": "string", "format": "email" },
+                  "password": { "type": "string", "minLength": 8 },
+                  "firstName": { "type": "string" },
+                  "lastName": { "type": "string" },
+                  "tenantName": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "User and tenant created" },
+          "400": { "description": "Validation error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "summary": "Login and receive JWT + refresh token",
+        "tags": ["Auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password"],
+                "properties": {
+                  "email": { "type": "string", "format": "email" },
+                  "password": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "JWT token and refresh token" },
+          "401": { "description": "Invalid credentials" }
+        }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "summary": "Refresh an expired access token",
+        "tags": ["Auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["refreshToken"],
+                "properties": {
+                  "refreshToken": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "New access token and rotated refresh token" },
+          "401": { "description": "Invalid or expired refresh token" }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "summary": "Get current authenticated user",
+        "tags": ["Auth"],
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Current user profile" },
+          "401": { "description": "Not authenticated" }
+        }
+      }
+    },
+    "/businesses": {
+      "get": {
+        "summary": "List businesses for tenant",
+        "tags": ["Business"],
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "Paginated business list" }
+        }
+      },
+      "post": {
+        "summary": "Create a business",
+        "tags": ["Business"],
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "vertical": { "type": "string", "default": "entertainment" },
+                  "legalName": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Business created" },
+          "400": { "description": "Validation error" }
+        }
+      }
+    },
+    "/businesses/{id}": {
+      "get": {
+        "summary": "Get business by ID",
+        "tags": ["Business"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Business details" },
+          "404": { "description": "Not found" }
+        }
+      },
+      "put": {
+        "summary": "Update business",
+        "tags": ["Business"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Business updated" },
+          "403": { "description": "Forbidden" }
+        }
+      },
+      "delete": {
+        "summary": "Archive business",
+        "tags": ["Business"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Business archived" }
+        }
+      }
+    },
+    "/businesses/{id}/metrics": {
+      "get": {
+        "summary": "Get business metrics",
+        "tags": ["Business"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Business metrics" } }
+      }
+    },
+    "/bookings": {
+      "get": {
+        "summary": "List bookings",
+        "tags": ["Booking"],
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Paginated booking list" } }
+      },
+      "post": {
+        "summary": "Create booking inquiry",
+        "tags": ["Booking"],
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "201": { "description": "Booking created" } }
+      }
+    },
+    "/bookings/{id}": {
+      "get": {
+        "summary": "Get booking by ID",
+        "tags": ["Booking"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Booking details" } }
+      }
+    },
+    "/bookings/{id}/status": {
+      "patch": {
+        "summary": "Update booking status (state machine transition)",
+        "tags": ["Booking"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Status updated" } }
+      }
+    },
+    "/bookings/{id}/cancel": {
+      "post": {
+        "summary": "Cancel booking with reversal journal entry",
+        "tags": ["Booking"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Booking cancelled" } }
+      }
+    },
+    "/ledger/accounts": {
+      "get": {
+        "summary": "List chart of accounts",
+        "tags": ["Ledger"],
+        "responses": { "200": { "description": "Chart of accounts" } }
+      }
+    },
+    "/ledger/accounts/{id}": {
+      "get": {
+        "summary": "Get account by ID",
+        "tags": ["Ledger"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Account details" } }
+      }
+    },
+    "/ledger/journal": {
+      "post": {
+        "summary": "Post journal entry (double-entry)",
+        "tags": ["Ledger"],
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "201": { "description": "Journal posted" } }
+      }
+    },
+    "/ledger/journals": {
+      "get": {
+        "summary": "List journals",
+        "tags": ["Ledger"],
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer" } },
+          { "name": "businessId", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Paginated journal list" } }
+      }
+    },
+    "/ledger/journals/{id}": {
+      "get": {
+        "summary": "Get journal by ID",
+        "tags": ["Ledger"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Journal with entries" } }
+      }
+    },
+    "/ledger/entries": {
+      "get": {
+        "summary": "List ledger entries",
+        "tags": ["Ledger"],
+        "parameters": [{ "name": "journalId", "in": "query", "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Ledger entries" } }
+      }
+    },
+    "/ledger/revenue": {
+      "get": { "summary": "List revenue events", "tags": ["Ledger"], "responses": { "200": { "description": "Revenue events" } } },
+      "post": { "summary": "Create revenue event", "tags": ["Ledger"], "responses": { "201": { "description": "Revenue event created" } } }
+    },
+    "/ledger/revenue/schedule": {
+      "get": { "summary": "Get revenue recognition schedule", "tags": ["Ledger"], "responses": { "200": { "description": "Revenue schedule" } } }
+    },
+    "/ledger/revenue/recognize": {
+      "post": { "summary": "Recognize revenue (ASC 606)", "tags": ["Ledger"], "responses": { "200": { "description": "Revenue recognized" } } }
+    },
+    "/agents": {
+      "get": {
+        "summary": "List agents",
+        "tags": ["Agent"],
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Paginated agent list" } }
+      },
+      "post": {
+        "summary": "Create agent",
+        "tags": ["Agent"],
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "201": { "description": "Agent created" } }
+      }
+    },
+    "/agents/{id}": {
+      "get": {
+        "summary": "Get agent by ID",
+        "tags": ["Agent"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Agent details" } }
+      },
+      "patch": {
+        "summary": "Update agent config",
+        "tags": ["Agent"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Agent updated" } }
+      },
+      "delete": {
+        "summary": "Deactivate agent",
+        "tags": ["Agent"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Agent deactivated" } }
+      }
+    },
+    "/agents/{id}/runs": {
+      "get": {
+        "summary": "List agent runs",
+        "tags": ["Agent"],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Paginated agent runs" } }
+      },
+      "post": {
+        "summary": "Create agent run",
+        "tags": ["Agent"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "201": { "description": "Agent run created" } }
+      }
+    },
+    "/agents/pipeline/stats": {
+      "get": { "summary": "OMEGA pipeline statistics", "tags": ["Agent"], "responses": { "200": { "description": "Pipeline stats" } } }
+    },
+    "/agents/pipeline/vgdo": {
+      "get": { "summary": "OMEGA VGDO score", "tags": ["Agent"], "responses": { "200": { "description": "VGDO score" } } }
+    },
+    "/marketplace/listings": {
+      "get": {
+        "summary": "List marketplace listings",
+        "tags": ["Marketplace"],
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Paginated listings" } }
+      },
+      "post": {
+        "summary": "Create listing",
+        "tags": ["Marketplace"],
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "201": { "description": "Listing created" } }
+      }
+    },
+    "/marketplace/listings/{id}": {
+      "get": {
+        "summary": "Get listing by ID",
+        "tags": ["Marketplace"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Listing details" } }
+      },
+      "patch": {
+        "summary": "Update listing (draft only)",
+        "tags": ["Marketplace"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Listing updated" } }
+      },
+      "delete": {
+        "summary": "Delist listing",
+        "tags": ["Marketplace"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Listing delisted" } }
+      }
+    },
+    "/marketplace/listings/{id}/publish": {
+      "patch": {
+        "summary": "Publish listing",
+        "tags": ["Marketplace"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Listing published" } }
+      }
+    },
+    "/marketplace/deals": {
+      "get": {
+        "summary": "List deals",
+        "tags": ["Marketplace"],
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Paginated deals" } }
+      },
+      "post": {
+        "summary": "Create deal room",
+        "tags": ["Marketplace"],
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "201": { "description": "Deal created" } }
+      }
+    },
+    "/marketplace/deals/{id}": {
+      "get": {
+        "summary": "Get deal by ID",
+        "tags": ["Marketplace"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Deal details" } }
+      }
+    },
+    "/marketplace/deals/{id}/transition": {
+      "post": {
+        "summary": "Advance deal state",
+        "tags": ["Marketplace"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Deal transitioned" } }
+      }
+    },
+    "/marketplace/deals/{id}/timeline": {
+      "get": {
+        "summary": "Get deal state transition history",
+        "tags": ["Marketplace"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Deal timeline" } }
+      }
+    },
+    "/rights/anchors": {
+      "get": { "summary": "List legal anchors", "tags": ["Rights"], "responses": { "200": { "description": "Legal anchors" } } },
+      "post": {
+        "summary": "Create legal anchor",
+        "tags": ["Rights"],
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "201": { "description": "Anchor created" } }
+      }
+    },
+    "/rights/anchors/{id}": {
+      "get": {
+        "summary": "Get anchor by ID",
+        "tags": ["Rights"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Anchor details" } }
+      },
+      "patch": {
+        "summary": "Update anchor",
+        "tags": ["Rights"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Anchor updated" } }
+      }
+    },
+    "/rights/assets": {
+      "get": {
+        "summary": "List rights assets",
+        "tags": ["Rights"],
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Paginated assets" } }
+      },
+      "post": {
+        "summary": "Create rights asset",
+        "tags": ["Rights"],
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "201": { "description": "Asset created" } }
+      }
+    },
+    "/rights/assets/{id}": {
+      "get": {
+        "summary": "Get asset by ID",
+        "tags": ["Rights"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Asset details" } }
+      },
+      "patch": {
+        "summary": "Update asset",
+        "tags": ["Rights"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Asset updated" } }
+      },
+      "delete": {
+        "summary": "Archive asset",
+        "tags": ["Rights"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Asset archived" } }
+      }
+    },
+    "/rights/assets/{id}/chain-of-title": {
+      "get": {
+        "summary": "Get chain of title for an asset",
+        "tags": ["Rights"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Chain of title" } }
+      }
+    },
+    "/rights/passports": {
+      "get": {
+        "summary": "List passports",
+        "tags": ["Rights"],
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Paginated passports" } }
+      },
+      "post": {
+        "summary": "Issue passport",
+        "tags": ["Rights"],
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "201": { "description": "Passport issued" } }
+      }
+    },
+    "/rights/passports/{id}": {
+      "get": {
+        "summary": "Get passport by ID (auto-expires if past expiry)",
+        "tags": ["Rights"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Passport details" } }
+      }
+    },
+    "/rights/passports/{id}/revoke": {
+      "post": {
+        "summary": "Revoke passport",
+        "tags": ["Rights"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Passport revoked" } }
+      }
+    },
+    "/rights/passports/{id}/renew": {
+      "post": {
+        "summary": "Renew passport",
+        "tags": ["Rights"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Passport renewed" } }
+      }
+    },
+    "/rights/businesses/{id}/transferability": {
+      "get": {
+        "summary": "Get transferability score with breakdown",
+        "tags": ["Rights"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Transferability breakdown with grade and factor details" } }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health check with PG and memory status",
+        "tags": ["Health"],
+        "responses": {
+          "200": { "description": "Healthy" },
+          "503": { "description": "Degraded (PG unreachable or memory critical)" }
+        }
+      }
+    }
+  },
+  "tags": [
+    { "name": "Auth", "description": "Registration, login, refresh, session" },
+    { "name": "Business", "description": "Business entity management" },
+    { "name": "Booking", "description": "Entertainment booking lifecycle with state machine" },
+    { "name": "Ledger", "description": "Double-entry accounting and ASC 606 revenue recognition" },
+    { "name": "Agent", "description": "AI agent registry and run orchestration" },
+    { "name": "Marketplace", "description": "Agent/company listing marketplace with deal rooms and escrow" },
+    { "name": "Rights", "description": "IP rights passports with chain-of-title and transferability scoring" },
+    { "name": "Health", "description": "Service health checks" }
+  ]
+}

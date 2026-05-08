@@ -1,204 +1,141 @@
-# Entertainment Business Exchange -- API
+# Entertainment Business Exchange — API
 
-Fastify v5 API server for the Entertainment Business Exchange platform. Multi-tenant entertainment booking, marketplace, and rights management powered by OMEGA orchestration pipeline.
+Fastify v5 API server for the Entertainment Business Exchange platform. Multi-tenant entertainment booking, marketplace, and rights management powered by the OMEGA orchestration pipeline.
+
+**v1.0.0** — 50+ endpoints, 165 tests, 7 bounded contexts, 4 ADRs.
 
 ## Quick Start
 
 ```bash
+# Local dev (in-memory stores)
 npm install
 npm run dev
+
+# With PostgreSQL (recommended for production)
+docker-compose up -d db
+DATABASE_URL=postgres://entx:entx_secret@localhost:5432/entertainment_exchange npm run dev
+
+# Docker Compose (full stack)
+docker-compose up -d
 ```
 
-The API starts on `http://localhost:3000`. Health check available at `/health`.
+The API starts on `http://localhost:3000`. Health check at `/health`.
 
 ## Available Scripts
 
 | Script | Command | Description |
 |--------|---------|-------------|
-| `dev` | `tsx watch src/server.ts` | Start dev server with hot reload |
-| `build` | `tsc` | Compile TypeScript to `dist/` |
-| `start` | `node dist/server.js` | Run compiled production server |
-| `typecheck` | `tsc --noEmit` | Verify types without emitting files |
-| `test` | `vitest run` | Run test suite |
-| `seed` | `tsx src/seed.ts` | Seed the database with sample data |
+| `dev` | `tsx watch src/server.ts` | Dev server with hot reload |
+| `build` | `tsc` | Compile to `dist/` |
+| `start` | `node dist/server.js` | Production server |
+| `typecheck` | `tsc --noEmit` | Type check only |
+| `test` | `vitest run` | 165 tests across 9 suites |
+| `seed` | `tsx src/seed.ts` | Seed sample data |
+
+## Authentication
+
+The API supports two authentication modes:
+
+1. **Header-based** (testing/internal): `x-actor-id`, `x-actor-type`, `x-actor-permissions`
+2. **JWT Bearer** (production): `Authorization: Bearer <token>`
+
+```
+POST /api/v1/auth/register  →  Create user + tenant
+POST /api/v1/auth/login      →  Get access token + refresh token
+POST /api/v1/auth/refresh    →  Rotate refresh token
+GET  /api/v1/auth/me         →  Current user profile
+```
+
+Passwords are hashed with PBKDF2 (SHA-256, 100K iterations). Common passwords are rejected.
 
 ## API Overview
 
-All routes are prefixed under `/api/v1`. Request context is injected via headers (`x-tenant-id`, `x-actor-id`, `x-actor-type`, `x-actor-permissions`, `x-trace-id`).
+All routes under `/api/v1`. Responses use `{ data }` envelope. Errors use `{ error: { code, message, requestId } }`.
 
-### Route Groups
+### Route Groups (50+ endpoints)
 
-#### Auth (`/api/v1/auth`)
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/auth/register` | Register a new user and tenant |
-| POST | `/auth/login` | Login with email and password |
-| GET | `/auth/me` | Get current authenticated user |
+| Domain | Prefix | Endpoints | Key Operations |
+|--------|--------|-----------|----------------|
+| **Auth** | `/auth` | 4 | register, login, refresh, me |
+| **Business** | `/` | 4 | CRUD + metrics |
+| **Booking** | `/` | 5 | CRUD + status transitions + cancel (with reversal journal) |
+| **Ledger** | `/ledger` | 9 | accounts, journals, entries, revenue recognition |
+| **Agent** | `/agents` | 9 | CRUD + runs + OMEGA pipeline stats |
+| **Marketplace** | `/marketplace` | 10 | listings, deals, transitions, timeline |
+| **Rights** | `/rights` | 14 | anchors, assets, passports, chain-of-title, transferability, renewal |
+| **Health** | `/` | 1 | PG + memory status |
 
-**Example: Register**
-```bash
-curl -X POST http://localhost:3000/api/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"user@example.com","password":"password123","firstName":"Jane","tenantName":"Acme Productions"}'
+### Pagination
+
+All list endpoints accept `?limit=&offset=` query params and return:
+```json
+{ "data": [...], "total": 142, "limit": 50, "offset": 0 }
 ```
 
-#### Businesses (`/api/v1`)
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/businesses` | Create a business with default chart of accounts |
-| GET | `/businesses` | List businesses for the current tenant |
-| GET | `/businesses/:id` | Get a single business |
-| GET | `/businesses/:id/metrics` | Get business financial metrics |
+### State Machines
 
-**Example: Create Business**
-```bash
-curl -X POST http://localhost:3000/api/v1/businesses \
-  -H "Content-Type: application/json" \
-  -H "x-tenant-id: <tenant-id>" \
-  -H "x-actor-id: <user-id>" \
-  -H "x-actor-permissions: business:create" \
-  -d '{"name":"Acme Entertainment","vertical":"music","legalName":"Acme Entertainment LLC"}'
-```
-
-#### Bookings (`/api/v1`)
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/bookings` | Create a new booking |
-| GET | `/bookings` | List bookings for the tenant |
-| GET | `/bookings/:id` | Get a single booking |
-| PATCH | `/bookings/:id/status` | Update booking status |
-
-**Example: Create Booking**
-```bash
-curl -X POST http://localhost:3000/api/v1/bookings \
-  -H "Content-Type: application/json" \
-  -H "x-tenant-id: <tenant-id>" \
-  -H "x-actor-id: <user-id>" \
-  -H "x-actor-permissions: booking:create" \
-  -d '{"eventType":"concert","eventName":"Summer Fest","eventDate":"2026-07-15","startTime":"19:00","endTime":"22:00","artistId":"<artist-id>","venueId":"<venue-id>","quotedAmountCents":500000}'
-```
-
-#### Ledger (`/api/v1/ledger`)
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/ledger/accounts?businessId=` | List chart of accounts (auto-seeded) |
-| POST | `/ledger/journal` | Post double-entry journal |
-| GET | `/ledger/journals?businessId=` | List journal entries |
-| GET | `/ledger/journals/:id` | Get a single journal with entries |
-| GET | `/ledger/revenue?businessId=` | List revenue events |
-| POST | `/ledger/revenue` | Record a revenue event |
-
-**Example: Post Journal**
-```bash
-curl -X POST http://localhost:3000/api/v1/ledger/journal \
-  -H "Content-Type: application/json" \
-  -H "x-tenant-id: <tenant-id>" \
-  -H "x-actor-id: <user-id>" \
-  -H "x-actor-permissions: payment:create" \
-  -d '{"businessId":"<business-id>","memo":"Booking deposit for Summer Fest","entries":[{"accountId":"<cash-account-id>","direction":"debit","amountCents":50000},{"accountId":"<deferred-account-id>","direction":"credit","amountCents":50000}]}'
-```
-
-#### Agents (`/api/v1/agents`)
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/agents/` | Create an AI agent |
-| GET | `/agents/` | List agents for the tenant |
-| GET | `/agents/:id` | Get a single agent |
-| POST | `/agents/:id/runs` | Execute an agent run (OMEGA pipeline) |
-| GET | `/agents/:id/runs` | List runs for an agent |
-| GET | `/agents/:id/runs/:runId` | Get a single agent run |
-| GET | `/agents/pipeline/stats` | OMEGA pipeline cache/routing stats |
-| GET | `/agents/pipeline/vgdo` | VGDO scoring summary |
-
-**Example: Create and Run Agent**
-```bash
-curl -X POST http://localhost:3000/api/v1/agents \
-  -H "Content-Type: application/json" \
-  -H "x-tenant-id: <tenant-id>" \
-  -H "x-actor-id: <user-id>" \
-  -H "x-actor-permissions: agent:run" \
-  -d '{"name":"Pricing Bot","role":"pricing-optimizer","autonomyLevel":2,"budgetDailyCents":1000}'
-```
-
-#### Marketplace (`/api/v1/marketplace`)
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/marketplace/listings` | Create a business listing |
-| GET | `/marketplace/listings` | List listings for the tenant |
-| GET | `/marketplace/listings/:id` | Get a single listing |
-| PATCH | `/marketplace/listings/:id/publish` | Publish a listing |
-| POST | `/marketplace/deals` | Create a deal on a listing |
-| GET | `/marketplace/deals` | List all deals |
-| GET | `/marketplace/deals/:id` | Get a single deal |
-
-**Example: Create Listing**
-```bash
-curl -X POST http://localhost:3000/api/v1/marketplace/listings \
-  -H "Content-Type: application/json" \
-  -H "x-tenant-id: <tenant-id>" \
-  -H "x-actor-id: <user-id>" \
-  -H "x-actor-permissions: listing:publish" \
-  -d '{"sellerBusinessId":"<business-id>","listingType":"talent_catalog","title":"Premium DJ Package","askingPriceCents":250000,"evidenceTier":"platform_verified"}'
-```
-
-#### Rights (`/api/v1/rights`)
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/rights/anchors` | Create a legal anchor |
-| GET | `/rights/anchors` | List legal anchors |
-| GET | `/rights/anchors/:id` | Get a single anchor |
-| POST | `/rights/assets` | Create a rights asset |
-| GET | `/rights/assets` | List rights assets |
-| GET | `/rights/assets/:id` | Get a single asset |
-| POST | `/rights/passports` | Issue a rights passport |
-| GET | `/rights/passports` | List passports |
-| GET | `/rights/passports/:id` | Get a single passport |
-
-**Example: Issue Passport**
-```bash
-curl -X POST http://localhost:3000/api/v1/rights/passports \
-  -H "Content-Type: application/json" \
-  -H "x-tenant-id: <tenant-id>" \
-  -H "x-actor-id: <user-id>" \
-  -H "x-actor-permissions: rights:issue" \
-  -d '{"rightsAssetId":"<asset-id>","legalAnchorId":"<anchor-id>","passportType":"performance_rights"}'
-```
+**Booking**: inquiry → quoted → confirmed → contracted → completed | cancelled → refunded
+**Deal**: created → negotiating → agreed → escrow_funded → completed (disputed/resolved as side states)
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PORT` | `3000` | HTTP port for the server |
+| `PORT` | `3000` | HTTP port |
 | `NODE_ENV` | `development` | Runtime environment |
-| `DATABASE_URL` | -- | PostgreSQL connection string |
-| `LOG_LEVEL` | `info` | Pino logger level (trace/debug/info/warn/error) |
+| `DATABASE_URL` | — | PostgreSQL connection string (enables persistence) |
+| `JWT_SECRET` | — | Required for JWT signing (min 32 chars) |
+| `LOG_LEVEL` | `info` | Pino log level |
+| `CORS_ORIGINS` | — | Comma-separated allowed origins |
+| `OPENAI_API_KEY` | — | Enables real embeddings (semantic cache) |
+| `EMBEDDING_PROVIDER` | `openai` | Embedding backend (`openai` or model name) |
 
 ## Architecture
 
-### Fastify v5 + OMEGA Orchestration + PostgreSQL
+```
+Request → requestContext → CORS → authPlugin → sanitizePlugin
+       → rateLimit → logger → metrics → routeHandler → errorHandler
+```
 
-The API server is built on **Fastify v5**, chosen per ADR-001 for its performance and plugin ecosystem. Domain boundaries are preserved through separate route registrations, enabling future extraction to Cloudflare Workers per service boundary.
+### Plugin Pipeline
 
-**Plugin pipeline:**
-1. `requestContext` -- Injects typed request context (`tenantId`, `actor`, `permissions`, `traceId`) from headers
-2. `errorHandler` -- Unified error handling with `AppError` classes
-3. `auth.plugin` -- JWT verification via jose
-4. `rate-limit.plugin` -- Per-tenant rate limiting
-5. `sanitize.plugin` -- Input sanitization
-6. `paginate.plugin` -- Cursor-based pagination support
-7. `metrics.plugin` -- Prometheus-style metrics collection
-8. `health.plugin` -- Health endpoint under `/health`
-9. `logger.plugin` -- Structured logging via Pino
+1. **requestContext** — Injects `ctx` (tenantId, actor, permissions, traceId) from headers
+2. **CORS** — Configurable origin allowlist, OPTIONS preflight
+3. **authPlugin** — JWT Bearer verification (HS256 via jose), `withAuth()` preHandler
+4. **sanitizePlugin** — 9-pattern injection detection (regex + optional LLM classifier)
+5. **rateLimit** — Per-tenant rate limiting
+6. **logger** — Structured JSON logging via Pino
+7. **metrics** — Request counting, latency tracking
+8. **health** — `/health` with PG ping and memory status
+9. **errorHandler** — Unified `AppError` → typed error responses
 
 ### OMEGA Pipeline
 
-Agent runs are processed through the OMEGA orchestration pipeline (`services/agent-executor.ts`):
+The orchestration stack (`@entertainment-exchange/orchestration`):
 
-- **Cache Tiers**: L1 (in-memory, 50ms), L2 (Redis, 5ms optical), L3 (disk, batch pre-fetch). Caches similar goals to avoid redundant LLM calls and reduce costs.
-- **VGDO Scoring**: Value-Gated Decision Optimization ranks model choices by quality-per-cent, dynamically routing to the cheapest model that meets a quality threshold.
-- **AutoRouter**: Batches concurrent agent runs, merges overlapping goals, and routes to the optimal model tier based on autonomy level and budget.
-- **Pipeline Stats**: Available at `GET /api/v1/agents/pipeline/stats` (hit ratios, cost savings, latency breakdown) and `GET /api/v1/agents/pipeline/vgdo` (per-model quality scores).
+- **OutputMaximizer**: dual-layer cache (LRU + SemanticCache), request coalescing, batch processing
+- **SNP Governance**: pattern validation, FED_SYNC receiver
+- **AutoRouter**: skill-based intent routing (marketplace-list, marketplace-buy, agent-thread, etc.)
+- **Embeddings**: OpenAI text-embedding-3-small with FNV hash fallback
+- **NanoMutationEngine**: DNA parameter evolution for agent optimization
+- **VGDO Scoring**: 0.4·Ω + 0.3·DNA + 0.2·S_iso + 0.1·ΔC
 
 ## Database
 
-Currently using in-memory stores for MVP development. PostgreSQL migration is planned -- the `DATABASE_URL` env var and `db` package (`@entertainment-exchange/db`) are wired for the migration. Run `npm run seed` to populate sample data.
+In-memory stores with optional PostgreSQL write-through/read-through. When `DATABASE_URL` is set:
+
+1. Migrations run automatically on startup (`packages/db/migrations/`)
+2. Stores hydrate from PG on startup (survives restart)
+3. Writes persist to PG in real time (snake_case column mapping)
+4. Health endpoint includes PG connectivity status
+
+## Architecture Decision Records
+
+- [ADR-001](docs/adr/001-fastify-mvp.md) — Fastify-first MVP with domain boundaries
+- [ADR-002](docs/adr/002-double-entry-ledger.md) — Double-entry ledger with revenue recognition
+- [ADR-003](docs/adr/003-omega-governance.md) — OMEGA governance pipeline
+- [ADR-004](docs/adr/004-rights-passport.md) — Rights passport chain-of-title
+
+## API Reference
+
+Full OpenAPI 3.0 spec at [openapi.json](openapi.json). All 50+ endpoints documented with request/response schemas.
