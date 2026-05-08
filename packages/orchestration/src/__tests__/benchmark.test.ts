@@ -21,7 +21,7 @@ describe('OutputMaximizer Benchmarks', () => {
   // Concurrent request handling benchmark
   it('handles concurrent identical requests without errors', async () => {
     const om = new OutputMaximizer({ batchSize: 8, flushIntervalMs: 10 });
-    om.setModelFn(async () => 'Concurrent response processed successfully with enough characters');
+    om.setModelFn(async () => 'Concurrent response processed successfully with enough chars');
 
     const promises = Array.from({ length: 10 }, () =>
       om.infer({ model: 'test', prompt: 'concurrent test' })
