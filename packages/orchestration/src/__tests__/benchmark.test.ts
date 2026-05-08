@@ -18,23 +18,43 @@ describe('OutputMaximizer Benchmarks', () => {
     const hitRate = hits / 100;
     expect(hitRate).toBeGreaterThan(0.9);
   });
-  // Concurrent request handling benchmark
-  it('handles concurrent identical requests without errors', async () => {
-    const om = new OutputMaximizer({ batchSize: 8, flushIntervalMs: 10 });
-    om.setModelFn(async () => 'Concurrent response processed successfully with enough chars');
-
-    const promises = Array.from({ length: 10 }, () =>
-      om.infer({ model: 'test', prompt: 'concurrent test' })
+  // Request coalescing benchmark
+  it('coalesces concurrent identical requests', async () => {
+    // Use short flush interval so batch fires quickly
+    const om = new OutputMaximizer({ batchSize: 8, flushIntervalMs: 5 });
+    let callCount = 0;
+    let resolveModel: ((v: string) => void) | undefined;
+    om.setModelFn(async (_req) => {
+      callCount++;
+      return new Promise<string>((resolve) => {
+        resolveModel = resolve;
+      });
+    });
+    // Fire the first request; it will enqueue and the flush timer will start
+    const p1 = om.infer({ model: 'test', prompt: 'coalesce test' });
+    // Poll until the batch flushes and the model function is invoked
+    for (let i = 0; i < 50 && callCount === 0; i++) {
+      await new Promise(r => setTimeout(r, 2));
+    }
+    expect(callCount).toBe(1);
+    expect(resolveModel).toBeDefined();
+    // Now fire 19 more concurrent requests — they should all hit the inFlight map
+    const extra = Array.from({ length: 19 }, () =>
+      om.infer({ model: 'test', prompt: 'coalesce test' })
     );
-    const results = await Promise.all(promises);
-
-    expect(results.length).toBe(10);
+    // Resolve the held model call; all 20 calls share the same batch promise
+    resolveModel!('Coalesced response long enough to pass the coherence gate test');
+    const results = await Promise.all([p1, ...extra]);
+    expect(results.length).toBe(20);
     results.forEach(r => expect(r.done).toBe(true));
+    // Coalescing should have reduced model calls
+    const stats = om.getStats();
+    expect(stats.coalescedHits).toBeGreaterThan(0);
   });
   // Batch processing benchmark
   it('processes batch within latency threshold', async () => {
     const om = new OutputMaximizer({ batchSize: 24, flushIntervalMs: 10 });
-    om.setModelFn(async (req) => {
+    om.setModelFn(async (_req) => {
       return 'Batched response for item processed successfully enough chars';
     });
     const start = performance.now();
