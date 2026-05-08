@@ -19,5 +19,7 @@ export { TransferabilityScorer } from './transferability-scorer.js';
 export type {
   TransferabilityGrade,
   TransferabilityScore,
+  TransferabilityBreakdown,
+  FactorDetail,
   BusinessProfile,
 } from './transferability-scorer.js';

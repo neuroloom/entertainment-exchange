@@ -172,7 +172,10 @@ export async function marketplaceRoutes(app: FastifyInstance) {
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     const allDeals: any[] = [];
     for (const d of deals.values()) allDeals.push(...d);
-    reply.send({ data: allDeals.filter(d => d.tenantId === ctx.tenantId) });
+    const tenantDeals = allDeals.filter(d => d.tenantId === ctx.tenantId);
+    const p = paginate(req.query);
+    const sliced = tenantDeals.slice(p.offset, p.offset + p.limit);
+    reply.send(paginatedResponse(sliced, tenantDeals.length, p));
   });
 
   app.get('/deals/:id', async (req, reply) => {
@@ -183,5 +186,39 @@ export async function marketplaceRoutes(app: FastifyInstance) {
       if (deal && deal.tenantId === ctx.tenantId) return reply.send({ data: deal });
     }
     throw AppError.notFound('Deal');
+  });
+
+  // Sprint 3b: PATCH /marketplace/deals/:id — update deal status with validated transitions
+  app.patch('/deals/:id', async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    if (!ctx.actor.permissions.includes('deal:close')) throw AppError.forbidden('Missing deal:close permission');
+
+    const dealId = (req.params as any).id;
+    let foundDeal: any = null;
+    let foundParentListing: any = null;
+    for (const dlist of deals.values()) {
+      const d = dlist.find(dd => dd.id === dealId);
+      if (d && d.tenantId === ctx.tenantId) {
+        foundDeal = d;
+        foundParentListing = listings.get(d.listingId);
+        break;
+      }
+    }
+    if (!foundDeal) throw AppError.notFound('Deal');
+
+    const body = UpdateDealSchema.parse(req.body);
+    const allowedTransitions = validDealTransitions[foundDeal.status];
+    if (!allowedTransitions || !allowedTransitions.includes(body.status)) {
+      throw AppError.invalid(`Cannot transition deal from '${foundDeal.status}' to '${body.status}'`);
+    }
+
+    const previousStatus = foundDeal.status;
+    foundDeal.status = body.status;
+
+    writeAudit(ctx, 'deal.transition', 'deal_room', foundDeal.id,
+      foundParentListing?.sellerBusinessId,
+      { from: previousStatus, to: body.status });
+    reply.send({ data: foundDeal });
   });
 }

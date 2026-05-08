@@ -22,7 +22,7 @@ describe('POST /api/v1/auth/register', () => {
       url: '/api/v1/auth/register',
       payload: {
         email: 'register-success@test.com',
-        password: 'password123',
+        password: 'secure-test-pass-99',
         firstName: 'Alice',
         lastName: 'Jones',
         tenantName: 'Alice Corp',
@@ -42,7 +42,7 @@ describe('POST /api/v1/auth/register', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/register',
-      payload: { email: 'no-tenant@test.com', password: 'password123' },
+      payload: { email: 'no-tenant@test.com', password: 'secure-test-pass-99' },
     });
 
     expect(res.statusCode).toBe(201);
@@ -55,7 +55,7 @@ describe('POST /api/v1/auth/register', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/register',
-      payload: { email: 'notanemail', password: 'password123' },
+      payload: { email: 'notanemail', password: 'secure-test-pass-99' },
     });
 
     expect(res.statusCode).toBe(400);
@@ -81,7 +81,7 @@ describe('POST /api/v1/auth/register', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/register',
-      payload: { password: 'password123' },
+      payload: { password: 'secure-test-pass-99' },
     });
 
     expect(res.statusCode).toBe(400);
@@ -136,7 +136,7 @@ describe('POST /api/v1/auth/login', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/login',
-      payload: { email: 'nobody@test.com', password: 'password123' },
+      payload: { email: 'nobody@test.com', password: 'secure-test-pass-99' },
     });
 
     expect(res.statusCode).toBe(401);
@@ -148,7 +148,7 @@ describe('POST /api/v1/auth/login', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/login',
-      payload: { email: 'badformat', password: 'password123' },
+      payload: { email: 'badformat', password: 'secure-test-pass-99' },
     });
 
     expect(res.statusCode).toBe(400);
@@ -162,7 +162,7 @@ describe('GET /api/v1/auth/me', () => {
     const regRes = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/register',
-      payload: { email: 'me-user@test.com', password: 'password123' },
+      payload: { email: 'me-user@test.com', password: 'secure-test-pass-99' },
     });
     const userId = JSON.parse(regRes.body).data.user.id;
 
@@ -191,7 +191,7 @@ describe('GET /api/v1/auth/me', () => {
     expect(res.statusCode).toBe(401);
     const body = JSON.parse(res.body);
     expect(body.error.code).toBe('UNAUTHENTICATED');
-    expect(body.error.message).toBe('Not authenticated');
+    expect(body.error.message).toBe('Authentication required');
   });
 
   it('returns 401 with empty x-actor-id', async () => {

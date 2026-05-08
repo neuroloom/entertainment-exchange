@@ -1,7 +1,7 @@
 // PassportVerifier — chain-of-title verification, passport lifecycle management
 // L3 MARKETPLACE+RIGHTS: RightsAsset → LegalAnchor → Passport chain
 
-export type PassportStatus = 'draft' | 'active' | 'revoked' | 'superseded';
+export type PassportStatus = 'draft' | 'active' | 'expired' | 'revoked' | 'superseded';
 export type PassportType = 'exclusive' | 'non-exclusive' | 'territorial' | 'time-limited' | 'hybrid';
 
 export interface LegalAnchor {
@@ -122,6 +122,14 @@ export class PassportVerifier {
     // Verify asset → business (assert exists)
     chainTrace.push(`asset:${passport.rightsAssetId} → business:${asset.businessId}`);
 
+    // Auto-expiry: if passport has an expiresAt, check and update status
+    if (passport.expiresAt && passport.status !== 'expired') {
+      const expiryDate = new Date(passport.expiresAt);
+      if (!isNaN(expiryDate.getTime()) && expiryDate < new Date()) {
+        passport.status = 'expired';
+      }
+    }
+
     // Check status is not revoked
     if (passport.status === 'revoked') {
       return {
@@ -136,6 +144,15 @@ export class PassportVerifier {
       return {
         valid: false,
         reason: `Passport ${passportId} has been superseded`,
+        chainTrace,
+      };
+    }
+
+    // Check status is not expired
+    if (passport.status === 'expired') {
+      return {
+        valid: false,
+        reason: `Passport ${passportId} is expired`,
         chainTrace,
       };
     }
@@ -251,6 +268,65 @@ export class PassportVerifier {
     passport.revocationReason = reason;
     passport.revokedAt = new Date().toISOString();
     return passport;
+  }
+
+  // ─── Renews a passport — creates a new passport linked to the same asset/anchor ──
+
+  renewPassport(passportId: string, newExpiresAt?: string): RightsPassport {
+    const existing = this.stores.passports.get(passportId);
+    if (!existing) {
+      throw new Error(`Passport not found: ${passportId}`);
+    }
+
+    if (existing.status === 'revoked') {
+      throw new Error(`Cannot renew a revoked passport: ${passportId}`);
+    }
+
+    // Supersede the existing passport and create a new one
+    const asset = this.stores.assets.get(existing.rightsAssetId);
+    if (!asset) {
+      throw new Error(`Rights asset not found for passport: ${existing.rightsAssetId}`);
+    }
+
+    const anchor = this.stores.anchors.get(existing.legalAnchorId);
+    if (!anchor) {
+      throw new Error(`Legal anchor not found for passport: ${existing.legalAnchorId}`);
+    }
+
+    // Compute next chain sequence
+    let maxSeq = existing.chainSequence;
+    for (const p of this.stores.passports.values()) {
+      if (p.rightsAssetId === existing.rightsAssetId && p.chainSequence > maxSeq) {
+        maxSeq = p.chainSequence;
+      }
+    }
+
+    // Mark existing as superseded (if not already)
+    if (existing.status !== 'superseded' && existing.status !== 'revoked') {
+      existing.status = 'superseded';
+    }
+
+    const newId = crypto.randomUUID();
+    const renewed: RightsPassport = {
+      id: newId,
+      tenantId: existing.tenantId,
+      rightsAssetId: existing.rightsAssetId,
+      legalAnchorId: existing.legalAnchorId,
+      passportType: existing.passportType,
+      status: 'active',
+      metadata: { ...existing.metadata, renewedFrom: passportId, renewedAt: new Date().toISOString() },
+      issuedAt: new Date().toISOString(),
+      expiresAt: newExpiresAt ?? existing.expiresAt ?? null,
+      supersedesPassportId: passportId,
+      supersededByPassportId: null,
+      revocationReason: null,
+      revokedAt: null,
+      chainSequence: maxSeq + 1,
+    };
+
+    existing.supersededByPassportId = newId;
+    this.stores.passports.set(newId, renewed);
+    return renewed;
   }
 
   // ─── Supersedes an old passport with a new one ───────────────────────────────

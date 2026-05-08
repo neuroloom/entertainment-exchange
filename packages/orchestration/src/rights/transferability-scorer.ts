@@ -9,6 +9,20 @@ export interface TransferabilityScore {
   grade: TransferabilityGrade;
 }
 
+export interface FactorDetail {
+  factor: string;
+  rawScore: number;        // 0-100
+  weight: number;          // percentage weight
+  weightedScore: number;   // (rawScore/100) * weight
+  explanation: string;
+}
+
+export interface TransferabilityBreakdown {
+  total: number;
+  grade: TransferabilityGrade;
+  factors: FactorDetail[];
+}
+
 export interface BusinessProfile {
   id: string;
   chainOfTitleUnbroken: boolean;
@@ -100,6 +114,105 @@ export class TransferabilityScorer {
       total: clamped,
       breakdown,
       grade: this.deriveGrade(clamped),
+    };
+  }
+
+  // ─── Detailed breakdown with per-factor explanations ────────────────────────
+
+  scoreBreakdown(profile: BusinessProfile): TransferabilityBreakdown {
+    const factors: FactorDetail[] = [
+      {
+        factor: 'chainOfTitle',
+        rawScore: this.scoreChainOfTitle(profile.chainOfTitleUnbroken),
+        weight: this.weights.chainOfTitle,
+        weightedScore: 0,
+        explanation: profile.chainOfTitleUnbroken
+          ? 'Chain of title is unbroken — all passport links verified'
+          : 'Chain of title has gaps — broken or missing passport links detected',
+      },
+      {
+        factor: 'verifiedAnchors',
+        rawScore: this.scoreVerifiedAnchors(profile.verifiedAnchorCount, profile.verifiedAnchorRequired),
+        weight: this.weights.verifiedAnchors,
+        weightedScore: 0,
+        explanation: profile.verifiedAnchorRequired === 0
+          ? 'No anchors required'
+          : `${profile.verifiedAnchorCount}/${profile.verifiedAnchorRequired} anchors verified`,
+      },
+      {
+        factor: 'noDisputes',
+        rawScore: this.scoreNoDisputes(profile.hasDisputes, profile.disputeCount),
+        weight: this.weights.noDisputes,
+        weightedScore: 0,
+        explanation: profile.hasDisputes
+          ? `${profile.disputeCount} dispute(s) found on record`
+          : 'No disputes on record',
+      },
+      {
+        factor: 'passportCurrency',
+        rawScore: this.scorePassportCurrency(profile.passportExpired, profile.passportExpiresInDays),
+        weight: this.weights.passportCurrency,
+        weightedScore: 0,
+        explanation: profile.passportExpired
+          ? 'Passport is expired'
+          : profile.passportExpiresInDays === null
+            ? 'Passport has no expiry (perpetual)'
+            : `Passport expires in ${profile.passportExpiresInDays} days`,
+      },
+      {
+        factor: 'revenueHistory',
+        rawScore: this.scoreRevenueHistory(profile.revenueHistoryMonths, profile.monthlyRevenueAvg),
+        weight: this.weights.revenueHistory,
+        weightedScore: 0,
+        explanation: profile.revenueHistoryMonths === 0
+          ? 'No revenue history available'
+          : `${profile.revenueHistoryMonths} months of revenue history, avg $${profile.monthlyRevenueAvg}/mo`,
+      },
+      {
+        factor: 'marketplaceActivity',
+        rawScore: this.scoreMarketplaceActivity(profile.marketplaceListings, profile.marketplaceSales),
+        weight: this.weights.marketplaceActivity,
+        weightedScore: 0,
+        explanation: profile.marketplaceListings === 0
+          ? 'No marketplace listings'
+          : `${profile.marketplaceListings} listing(s), ${profile.marketplaceSales} sale(s)`,
+      },
+      {
+        factor: 'agentAutomation',
+        rawScore: this.scoreAgentAutomation(profile.agentAutomationLevel),
+        weight: this.weights.agentAutomation,
+        weightedScore: 0,
+        explanation: `Agent automation level: ${profile.agentAutomationLevel}/100`,
+      },
+      {
+        factor: 'bookingCompletion',
+        rawScore: this.scoreBookingCompletion(profile.bookingCompletionRate),
+        weight: this.weights.bookingCompletion,
+        weightedScore: 0,
+        explanation: `Booking completion rate: ${Math.round(profile.bookingCompletionRate * 100)}%`,
+      },
+      {
+        factor: 'platformTenure',
+        rawScore: this.scorePlatformTenure(profile.platformTenureDays),
+        weight: this.weights.platformTenure,
+        weightedScore: 0,
+        explanation: `Platform tenure: ${profile.platformTenureDays} days`,
+      },
+    ];
+
+    // Compute weighted scores
+    let total = 0;
+    for (const f of factors) {
+      f.weightedScore = Math.round((f.rawScore / 100) * f.weight * 100) / 100;
+      total += f.weightedScore;
+    }
+
+    const clamped = Math.min(100, Math.max(0, Math.round(total * 100) / 100));
+
+    return {
+      total: clamped,
+      grade: this.deriveGrade(clamped),
+      factors,
     };
   }
 

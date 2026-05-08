@@ -7,7 +7,7 @@ export { generateAgentReplies } from './agent-exchange.js';
 export { EvidenceValidator } from './evidence-validator.js';
 export { DealRoomEngine } from './deal-room-engine.js';
 
-export type { EvidenceTier, EvidenceValidationResult } from './evidence-validator.js';
+export type { EvidenceTier, EvidenceValidationResult, EvidenceDocument } from './evidence-validator.js';
 export type { DealState, DealRecord, DealEvent } from './deal-room-engine.js';
 
 export type {

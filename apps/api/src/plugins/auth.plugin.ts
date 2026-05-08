@@ -1,6 +1,7 @@
 // Auth plugin — JWT sign/verify with jose, permission enforcement, CORS
 import type { FastifyInstance, FastifyRequest, preHandlerHookHandler } from 'fastify';
 import * as jose from 'jose';
+import { AppError } from './errorHandler.js';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -74,26 +75,14 @@ export interface PermissionSet {
 export function withAuth(...required: string[]): preHandlerHookHandler {
   return async (req: FastifyRequest) => {
     const ctx = (req as any).ctx;
-    if (!ctx?.actor?.userId) throw unauthorized();
-    if (required.length === 0) return; // auth only, no specific permissions
+    // Accept both JWT-derived auth AND header-based auth (x-actor-id)
+    const isAuthenticated = ctx?.actor?.userId && ctx.actor.userId !== 'anonymous';
+    if (!isAuthenticated) throw AppError.unauthenticated('Authentication required');
+    if (required.length === 0) return;
     const has = new Set(ctx.actor.permissions ?? []);
     const missing = required.filter(p => !has.has(p));
-    if (missing.length > 0) throw forbidden(`Missing permissions: ${missing.join(', ')}`);
+    if (missing.length > 0) throw AppError.forbidden(`Missing permissions: ${missing.join(', ')}`);
   };
-}
-
-function unauthorized(): Error {
-  const err = new Error('Authentication required');
-  (err as any).statusCode = 401;
-  (err as any).code = 'UNAUTHENTICATED';
-  return err;
-}
-
-function forbidden(msg: string): Error {
-  const err = new Error(msg);
-  (err as any).statusCode = 403;
-  (err as any).code = 'FORBIDDEN';
-  return err;
 }
 
 // ── Fastify Plugin ──────────────────────────────────────────────────────────

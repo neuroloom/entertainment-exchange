@@ -96,6 +96,8 @@ export type {
   PassportVerifierStores,
   TransferabilityGrade,
   TransferabilityScore,
+  TransferabilityBreakdown,
+  FactorDetail,
   BusinessProfile,
 } from './rights/index.js';
 

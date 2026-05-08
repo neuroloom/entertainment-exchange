@@ -136,4 +136,53 @@ export async function bookingRoutes(app: FastifyInstance) {
     writeAudit(ctx, 'booking.status', 'booking', booking.id, booking.businessId, { status: body.status, reason: body.reason });
     reply.send({ data: booking });
   });
+
+  app.post('/bookings/:id/cancel', async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    if (!ctx.actor.permissions.includes('booking:confirm')) throw AppError.forbidden('Missing booking:confirm permission');
+
+    const booking = bookings.get((req.params as any).id);
+    if (!booking || booking.tenantId !== ctx.tenantId) throw AppError.notFound('Booking');
+
+    if (isTerminalState(booking.status as BookingState)) {
+      throw AppError.invalid(`Cannot cancel a booking in "${booking.status}" state`);
+    }
+
+    const previousStatus = booking.status;
+
+    // Create a reversal journal entry if the booking had been confirmed
+    if (previousStatus === 'confirmed' || previousStatus === 'contracted') {
+      const acctMap = getBusinessAccountMap(booking.businessId);
+      const deferredRevId = acctMap.get('2000');
+      const bookingRevId = acctMap.get('4000');
+
+      if (deferredRevId && bookingRevId && booking.quotedAmountCents) {
+        const journalId = uuid();
+        journals.addJournal(
+          {
+            id: journalId,
+            tenantId: ctx.tenantId,
+            businessId: booking.businessId,
+            memo: `Cancel booking ${booking.id} — reversal`,
+            referenceType: 'booking',
+            referenceId: booking.id,
+            occurredAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+          },
+          [
+            { id: uuid(), tenantId: ctx.tenantId, journalId, accountId: deferredRevId, direction: 'debit', amountCents: booking.quotedAmountCents },
+            { id: uuid(), tenantId: ctx.tenantId, journalId, accountId: bookingRevId, direction: 'credit', amountCents: booking.quotedAmountCents },
+          ],
+        );
+      }
+    }
+
+    booking.status = 'cancelled';
+    booking.updatedAt = new Date().toISOString();
+    bookings.set(booking);
+
+    writeAudit(ctx, 'booking.cancel', 'booking', booking.id, booking.businessId, { previousStatus });
+    reply.send({ data: booking });
+  });
 }
