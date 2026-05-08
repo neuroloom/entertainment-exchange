@@ -89,8 +89,17 @@ export async function bookingRoutes(app: FastifyInstance) {
   app.get('/bookings', async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
+
+    const query = req.query as Record<string, string>;
+    const limit = query.limit ? parseInt(query.limit, 10) : 50;
+    const offset = query.offset ? parseInt(query.offset, 10) : 0;
+
     const all = bookings.all(ctx.tenantId);
-    reply.send({ data: all });
+    const total = all.length;
+    const data = all.slice(offset, offset + limit);
+
+    const response: PaginatedResponse<typeof data[number]> = { data, total, limit, offset };
+    reply.send(response);
   });
 
   app.get('/bookings/:id', async (req, reply) => {

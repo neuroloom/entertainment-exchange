@@ -34,6 +34,8 @@ export type DealState =
   | 'legal_review'
   | 'closing'
   | 'completed'
+  | 'disputed'
+  | 'resolved'
   | 'rejected'
   | 'cancelled'
   | 'expired';
