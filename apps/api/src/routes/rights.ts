@@ -256,6 +256,16 @@ export async function rightsRoutes(app: FastifyInstance) {
     const ctx = (req as any).ctx;
     const p = passports.get((req.params as any).id);
     if (!p || p.tenantId !== ctx.tenantId) throw AppError.notFound('Passport');
+
+    // Auto-expiry: check if expiresAt has passed and update status to expired
+    if (p.expiresAt && p.status === 'active') {
+      const expires = new Date(p.expiresAt);
+      if (!isNaN(expires.getTime()) && expires < new Date()) {
+        p.status = 'expired';
+        passports.set(p);
+      }
+    }
+
     reply.send({ data: p });
   });
 
@@ -274,6 +284,35 @@ export async function rightsRoutes(app: FastifyInstance) {
     passVerifier.revokePassport(passportId, body.reason);
     writeAudit(ctx, 'passport.revoke', 'rights_passport', passportId, undefined, { reason: body.reason });
     reply.send({ data: passport });
+  });
+
+  // ─── Renew passport ─────────────────────────────────────────────────────────
+
+  app.post('/passports/:id/renew', async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    if (!ctx.actor.permissions.includes('rights:issue')) throw AppError.forbidden('Missing rights:issue permission');
+
+    const passportId = (req.params as any).id;
+    const existing = passports.get(passportId);
+    if (!existing || existing.tenantId !== ctx.tenantId) throw AppError.notFound('Passport');
+
+    if (existing.status === 'revoked') {
+      throw AppError.invalid('Cannot renew a revoked passport');
+    }
+
+    const body = z.object({ expiresAt: z.string().optional() }).parse(req.body);
+    const renewed = passVerifier.renewPassport(passportId, body.expiresAt);
+
+    writeAudit(ctx, 'passport.renew', 'rights_passport', renewed.id, assets.get(renewed.rightsAssetId)?.businessId, {
+      previousPassportId: passportId,
+    });
+    reply.status(201).send({
+      data: {
+        renewed: renewed,
+        previous: existing,
+      },
+    });
   });
 
   // ═══ Business Transferability Scoring ════════════════════════════════════════
@@ -343,7 +382,7 @@ export async function rightsRoutes(app: FastifyInstance) {
     };
 
     const scorer = new TransferabilityScorer();
-    const result = scorer.score(profile);
+    const result = scorer.scoreBreakdown(profile);
 
     reply.send({ data: result });
   });

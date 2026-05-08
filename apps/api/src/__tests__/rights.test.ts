@@ -353,9 +353,10 @@ describe('Rights routes', () => {
       expect(typeof body.data.total).toBe('number');
       expect(body.data.total).toBeGreaterThanOrEqual(0);
       expect(body.data.total).toBeLessThanOrEqual(100);
-      expect(body.data.breakdown).toBeDefined();
+      expect(body.data.factors).toBeDefined();
+      expect(Array.isArray(body.data.factors)).toBe(true);
       expect(typeof body.data.grade).toBe('string');
-      expect(['A', 'B', 'C', 'D', 'F']).toContain(body.data.grade);
+      expect(['S', 'A', 'B', 'C', 'D', 'F']).toContain(body.data.grade);
     });
 
     it('returns 400 when tenant id is missing', async () => {

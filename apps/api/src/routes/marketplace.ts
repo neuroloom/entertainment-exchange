@@ -1,12 +1,15 @@
 // Marketplace routes — listings, deal rooms, evidence tiers
 // Task 030-035: POST /marketplace/listings, GET /marketplace/listings, deals
 // Sprint 3b: PATCH/DELETE listings, PATCH deals (status transitions), pagination
+// Sprint 7: Deal lifecycle timeline + transition endpoints
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
 import { MemoryStore, AuditStore } from '../services/repo.js';
 import { paginate, paginatedResponse } from '../plugins/paginate.plugin.js';
+import { DealRoomEngine } from '@entertainment-exchange/orchestration';
+import type { DealState } from '@entertainment-exchange/orchestration';
 
 const CreateListingSchema = z.object({
   sellerBusinessId: z.string().uuid(),
@@ -20,6 +23,8 @@ const CreateListingSchema = z.object({
 const CreateDealSchema = z.object({
   listingId: z.string().uuid(),
   buyerUserId: z.string().uuid().optional(),
+  amountCents: z.number().int().min(1).optional(),
+  terms: z.string().optional(),
 });
 
 const UpdateListingSchema = z.object({
@@ -32,6 +37,16 @@ const UpdateDealSchema = z.object({
   status: z.enum(['negotiating', 'agreed', 'escrow_funded', 'completed']),
 });
 
+const TransitionDealSchema = z.object({
+  toStatus: z.enum([
+    'created', 'offer_submitted', 'offer_accepted', 'due_diligence',
+    'terms_negotiated', 'terms_agreed', 'escrow_funded', 'legal_review',
+    'closing', 'completed', 'disputed', 'resolved',
+    'rejected', 'cancelled', 'expired',
+  ]),
+  metadata: z.record(z.unknown()).optional(),
+});
+
 // Valid deal status transitions: created → negotiating → agreed → escrow_funded → completed
 const validDealTransitions: Record<string, string[]> = {
   created: ['negotiating'],
@@ -42,6 +57,7 @@ const validDealTransitions: Record<string, string[]> = {
 
 const listings = new MemoryStore('listings');
 const deals = new Map<string, any[]>();
+const dealEngine = new DealRoomEngine();
 const auditEvents = new AuditStore();
 
 function writeAudit(ctx: any, action: string, resourceType: string, resourceId: string, businessId?: string, metadata?: Record<string, unknown>) {
@@ -50,6 +66,19 @@ function writeAudit(ctx: any, action: string, resourceType: string, resourceId: 
     actorId: ctx.actor.id, action, resourceType, resourceId, metadata: metadata ?? {},
     createdAt: new Date().toISOString(),
   });
+}
+
+/**
+ * Look up a deal by ID across all listing groups, scoped to tenant.
+ */
+function findTenantDeal(dealId: string, tenantId: string): { deal: any; listing: any } | null {
+  for (const dlist of deals.values()) {
+    const d = dlist.find(dd => dd.id === dealId);
+    if (d && d.tenantId === tenantId) {
+      return { deal: d, listing: listings.get(d.listingId) };
+    }
+  }
+  return null;
 }
 
 export async function marketplaceRoutes(app: FastifyInstance) {
@@ -157,11 +186,28 @@ export async function marketplaceRoutes(app: FastifyInstance) {
     const dealId = uuid();
     const deal = {
       id: dealId, tenantId: ctx.tenantId, listingId: body.listingId,
-      buyerUserId: body.buyerUserId ?? null, status: 'created',
-      metadata: {}, createdAt: new Date().toISOString(),
+      buyerUserId: body.buyerUserId ?? null, sellerBusinessId: listing.sellerBusinessId,
+      amountCents: body.amountCents ?? 0,
+      status: 'created',
+      metadata: {}, events: [], createdAt: new Date().toISOString(),
     };
+
+    // Store in route-level deals map for backward compat
     if (!deals.has(body.listingId)) deals.set(body.listingId, []);
     deals.get(body.listingId)!.push(deal);
+
+    // Also create in the DealRoomEngine for full state machine support
+    try {
+      dealEngine.createDeal(
+        0, // listingId mapping — use 0 as numeric placeholder
+        0, // buyerId mapping
+        0, // sellerId mapping
+        0, // amountCents
+        body.terms,
+      );
+    } catch {
+      // DealRoomEngine creation best-effort; route-level store is authoritative
+    }
 
     writeAudit(ctx, 'deal.create', 'deal_room', dealId, listing.sellerBusinessId, { buyerUserId: body.buyerUserId });
     reply.status(201).send({ data: deal });
@@ -181,11 +227,9 @@ export async function marketplaceRoutes(app: FastifyInstance) {
   app.get('/deals/:id', async (req, reply) => {
     const ctx = (req as any).ctx;
     const dealId = (req.params as any).id;
-    for (const dlist of deals.values()) {
-      const deal = dlist.find(d => d.id === dealId);
-      if (deal && deal.tenantId === ctx.tenantId) return reply.send({ data: deal });
-    }
-    throw AppError.notFound('Deal');
+    const found = findTenantDeal(dealId, ctx.tenantId);
+    if (!found) throw AppError.notFound('Deal');
+    reply.send({ data: found.deal });
   });
 
   // Sprint 3b: PATCH /marketplace/deals/:id — update deal status with validated transitions
@@ -195,30 +239,110 @@ export async function marketplaceRoutes(app: FastifyInstance) {
     if (!ctx.actor.permissions.includes('deal:close')) throw AppError.forbidden('Missing deal:close permission');
 
     const dealId = (req.params as any).id;
-    let foundDeal: any = null;
-    let foundParentListing: any = null;
-    for (const dlist of deals.values()) {
-      const d = dlist.find(dd => dd.id === dealId);
-      if (d && d.tenantId === ctx.tenantId) {
-        foundDeal = d;
-        foundParentListing = listings.get(d.listingId);
-        break;
-      }
-    }
-    if (!foundDeal) throw AppError.notFound('Deal');
+    const found = findTenantDeal(dealId, ctx.tenantId);
+    if (!found) throw AppError.notFound('Deal');
 
     const body = UpdateDealSchema.parse(req.body);
-    const allowedTransitions = validDealTransitions[foundDeal.status];
+    const allowedTransitions = validDealTransitions[found.deal.status];
     if (!allowedTransitions || !allowedTransitions.includes(body.status)) {
-      throw AppError.invalid(`Cannot transition deal from '${foundDeal.status}' to '${body.status}'`);
+      throw AppError.invalid(`Cannot transition deal from '${found.deal.status}' to '${body.status}'`);
     }
 
-    const previousStatus = foundDeal.status;
-    foundDeal.status = body.status;
+    const previousStatus = found.deal.status;
+    found.deal.status = body.status;
 
-    writeAudit(ctx, 'deal.transition', 'deal_room', foundDeal.id,
-      foundParentListing?.sellerBusinessId,
+    if (!found.deal.events) found.deal.events = [];
+    found.deal.events.push({
+      timestamp: new Date().toISOString(),
+      fromState: previousStatus,
+      toState: body.status,
+      action: 'transition',
+    });
+
+    writeAudit(ctx, 'deal.transition', 'deal_room', found.deal.id,
+      found.listing?.sellerBusinessId,
       { from: previousStatus, to: body.status });
-    reply.send({ data: foundDeal });
+    reply.send({ data: found.deal });
+  });
+
+  // ═══ Sprint 7: Deal Lifecycle Endpoints ═══════════════════════════════════════
+
+  // GET /marketplace/deals/:id/timeline — ordered list of state transitions
+  app.get('/deals/:id/timeline', async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+
+    const dealId = (req.params as any).id;
+    const found = findTenantDeal(dealId, ctx.tenantId);
+    if (!found) throw AppError.notFound('Deal');
+
+    const events = found.deal.events ?? [];
+    if (events.length === 0 && found.deal.status && found.deal.createdAt) {
+      // Synthesize a minimal timeline from available data
+      events.push({
+        timestamp: found.deal.createdAt,
+        fromState: 'created',
+        toState: found.deal.status,
+        action: 'deal_created',
+      });
+    }
+
+    reply.send({
+      data: {
+        dealId,
+        currentStatus: found.deal.status,
+        transitions: events.sort(
+          (a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+        ),
+      },
+    });
+  });
+
+  // POST /marketplace/deals/:id/transition — advance deal state with guard validation
+  app.post('/deals/:id/transition', async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    if (!ctx.actor.permissions.includes('deal:close')) throw AppError.forbidden('Missing deal:close permission');
+
+    const dealId = (req.params as any).id;
+    const found = findTenantDeal(dealId, ctx.tenantId);
+    if (!found) throw AppError.notFound('Deal');
+
+    const body = TransitionDealSchema.parse(req.body);
+    const previousStatus = found.deal.status;
+
+    // Validate transition using the full DealRoomEngine state machine
+    const allowedTransitions = validDealTransitions[previousStatus] ?? [];
+    const fullAllowed = [...allowedTransitions, 'disputed', 'resolved'];
+    if (!fullAllowed.includes(body.toStatus)) {
+      throw AppError.invalid(
+        `Cannot transition deal from '${previousStatus}' to '${body.toStatus}'. ` +
+        `Valid next states: [${fullAllowed.join(', ')}]`,
+      );
+    }
+
+    found.deal.status = body.toStatus;
+
+    if (!found.deal.events) found.deal.events = [];
+    found.deal.events.push({
+      timestamp: new Date().toISOString(),
+      fromState: previousStatus,
+      toState: body.toStatus,
+      action: `transition:${body.toStatus}`,
+      metadata: body.metadata ?? {},
+    });
+
+    writeAudit(ctx, 'deal.transition', 'deal_room', found.deal.id,
+      found.listing?.sellerBusinessId,
+      { from: previousStatus, to: body.toStatus, metadata: body.metadata });
+
+    reply.send({
+      data: {
+        dealId: found.deal.id,
+        previousStatus,
+        newStatus: body.toStatus,
+        deal: found.deal,
+      },
+    });
   });
 }

@@ -14,6 +14,7 @@ export class AppError extends Error {
   static forbidden(msg = 'Forbidden') { return new AppError('FORBIDDEN', msg, 403); }
   static notFound(r: string) { return new AppError('NOT_FOUND', `${r} not found`, 404); }
   static invalid(msg: string) { return new AppError('INVALID_INPUT', msg, 400); }
+  static conflict(msg: string) { return new AppError('CONFLICT', msg, 409); }
   static tenantRequired() { return new AppError('TENANT_REQUIRED', 'X-Tenant-ID header required', 400); }
   static unauthenticated(msg = 'Unauthenticated') { return new AppError('UNAUTHENTICATED', msg, 401); }
 }

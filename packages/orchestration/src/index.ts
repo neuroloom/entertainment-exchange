@@ -50,7 +50,7 @@ export type {
 } from './nano/index.js';
 
 // Marketplace exports (from neuroloom/velra + neuroloom/agent-exchange)
-export { AgentMarketplace, generateAgentReplies } from './marketplace/index.js';
+export { AgentMarketplace, generateAgentReplies, EvidenceValidator, DealRoomEngine } from './marketplace/index.js';
 // Booking domain exports
 export { BOOKING_STATES, ALLOWED_TRANSITIONS, assertBookingTransition, isTerminalState, getNextStates, BookingStateError, calculateQuote } from './booking/index.js';
 export type { BookingState, EventType, QuoteParams, QuoteBreakdown } from './booking/index.js';
@@ -79,6 +79,12 @@ export type {
   AgentReplies,
   PurchaseStatus,
   AgentPurchaseTransaction,
+  EvidenceTier,
+  EvidenceValidationResult,
+  EvidenceDocument,
+  DealState,
+  DealRecord,
+  DealEvent,
 } from './marketplace/index.js';
 
 // Rights module — passport chain-of-title, transferability scoring

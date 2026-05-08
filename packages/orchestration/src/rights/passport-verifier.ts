@@ -302,7 +302,7 @@ export class PassportVerifier {
     }
 
     // Mark existing as superseded (if not already)
-    if (existing.status !== 'superseded' && existing.status !== 'revoked') {
+    if (existing.status !== 'superseded') {
       existing.status = 'superseded';
     }
 

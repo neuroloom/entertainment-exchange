@@ -19,18 +19,19 @@ const BASE_HEADERS = {
   'x-actor-permissions': 'booking:create,booking:confirm',
 };
 
-function validPayload() {
-  return {
-    eventType: 'nightclub',
-    eventName: 'DJ Set Friday',
-    eventDate: '2026-06-15',
-    startTime: '22:00',
-    endTime: '04:00',
-    clientId: '00000000-0000-0000-0000-000000000001',
-    venueId: '00000000-0000-0000-0000-000000000002',
-    quotedAmountCents: 150000,
-    source: 'website',
+function validPayload(overrides: Record<string, unknown> = {}) {
+  const base = {
+    eventType: 'nightclub' as string,
+    eventName: 'DJ Set Friday' as string,
+    eventDate: '2026-06-15' as string,
+    startTime: '22:00' as string,
+    endTime: '04:00' as string,
+    clientId: '00000000-0000-0000-0000-000000000001' as string,
+    venueId: '00000000-0000-0000-0000-000000000002' as string,
+    quotedAmountCents: 150000 as number | undefined,
+    source: 'website' as string,
   };
+  return { ...base, ...overrides };
 }
 
 describe('POST /api/v1/bookings', () => {
@@ -121,8 +122,7 @@ describe('POST /api/v1/bookings', () => {
   });
 
   it('defaults quotedAmountCents to null when omitted', async () => {
-    const p = validPayload();
-    delete p.quotedAmountCents;
+    const p = validPayload({ quotedAmountCents: undefined });
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/bookings',
