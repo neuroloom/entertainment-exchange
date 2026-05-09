@@ -108,12 +108,45 @@ export async function businessRoutes(app: FastifyInstance) {
 
   app.get('/businesses/:id/metrics', async (req, reply) => {
     const ctx = (req as any).ctx;
-    const b = businesses.get((req.params as any).id);
+    const businessId = (req.params as any).id;
+    const b = businesses.get(businessId);
     if (!b || b.tenantId !== ctx.tenantId) throw AppError.notFound('Business');
+
+    // Resolve account IDs from the single source of truth (ledger chart of accounts)
+    const accts = getOrCreateAccounts(businessId, ctx.tenantId);
+    const codeToId = new Map<string, string>();
+    for (const a of accts) codeToId.set(a.code, a.id);
+
+    const bookingRevId = codeToId.get('4000') ?? '';
+    const deferredRevId = codeToId.get('2000') ?? '';
+    const providerFeesId = codeToId.get('5000') ?? '';
+
+    // Sum journal entries for this business by account ID
+    const sumAccount = (accountId: string): number => {
+      if (!accountId) return 0;
+      let total = 0;
+      for (const entry of journalStore.entries) {
+        if (entry.accountId !== accountId) continue;
+        // Verify the parent journal belongs to this business
+        const journal = journalStore.journals.find((j: any) => j.id === entry.journalId);
+        if (!journal || journal.businessId !== businessId) continue;
+        total += (entry.direction === 'credit' ? entry.amountCents : -entry.amountCents);
+      }
+      return total;
+    };
+
+    const recognizedRevenue = sumAccount(bookingRevId);
+    const providerFees = sumAccount(providerFeesId);
+    const deferredRevenue = sumAccount(deferredRevId);
+
     reply.send({
       data: {
-        recognizedRevenue: 0, deferredRevenue: 0, bookedFutureRevenue: 0,
-        grossMargin: 0, automationCoverage: 0, transferabilityScore: 0,
+        recognizedRevenue,
+        deferredRevenue,
+        bookedFutureRevenue: 0,   // Requires cross-domain wiring to booking pipeline
+        grossMargin: recognizedRevenue - providerFees,
+        automationCoverage: 0,     // Requires cross-domain wiring to agent executor stats
+        transferabilityScore: 0,   // Requires cross-domain wiring to rights passport service
       },
     });
   });
@@ -165,5 +198,25 @@ export async function businessRoutes(app: FastifyInstance) {
 
     writeAudit(ctx, 'business.archive', 'business', b.id, b.id);
     reply.send({ data: b });
+  });
+
+  // Audit events endpoint — compliance retrieval for audit:view permission
+  app.get('/audit', async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    if (!ctx.actor.permissions.includes('audit:view')) throw AppError.forbidden('Missing audit:view permission');
+
+    const query = req.query as Record<string, string>;
+    let events = auditEvents.all(ctx.tenantId);
+    if (query.resourceType) events = events.filter((e: any) => e.resourceType === query.resourceType);
+    if (query.action) events = events.filter((e: any) => e.action === query.action);
+    if (query.businessId) events = events.filter((e: any) => e.businessId === query.businessId);
+
+    const limit = parseInt(query.limit, 10) || 50;
+    const offset = parseInt(query.offset, 10) || 0;
+    const total = events.length;
+    const data = events.slice(offset, offset + limit);
+
+    reply.send({ data, total, limit, offset });
   });
 }

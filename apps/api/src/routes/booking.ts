@@ -127,6 +127,59 @@ export async function bookingRoutes(app: FastifyInstance) {
     reply.send({ data: b });
   });
 
+  app.put('/bookings/:id', {
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          eventType: { type: 'string', minLength: 1 },
+          eventName: { type: 'string' },
+          eventDate: { type: 'string', minLength: 1 },
+          startTime: { type: 'string', minLength: 1 },
+          endTime: { type: 'string', minLength: 1 },
+          clientId: { type: 'string', format: 'uuid' },
+          artistId: { type: 'string', format: 'uuid' },
+          venueId: { type: 'string', format: 'uuid' },
+          quotedAmountCents: { type: 'integer', minimum: 0 },
+          source: { type: 'string' },
+          metadata: { type: 'object', additionalProperties: true },
+        },
+        additionalProperties: false,
+      },
+    },
+  }, async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    if (!ctx.actor.permissions.includes('booking:create')) throw AppError.forbidden('Missing booking:create permission');
+
+    const booking = bookings.get((req.params as any).id);
+    if (!booking || booking.tenantId !== ctx.tenantId) throw AppError.notFound('Booking');
+
+    if (isTerminalState(booking.status as BookingState)) {
+      throw AppError.invalid(`Cannot update a booking in terminal "${booking.status}" state`);
+    }
+
+    const body = req.body as Record<string, unknown>;
+
+    if ('eventType' in body && body.eventType !== undefined) booking.eventType = body.eventType;
+    if ('eventName' in body) booking.eventName = body.eventName ?? null;
+    if ('eventDate' in body && body.eventDate !== undefined) booking.eventDate = body.eventDate;
+    if ('startTime' in body && body.startTime !== undefined) booking.startTime = body.startTime;
+    if ('endTime' in body && body.endTime !== undefined) booking.endTime = body.endTime;
+    if ('clientId' in body) booking.clientId = body.clientId ?? null;
+    if ('artistId' in body) booking.artistId = body.artistId ?? null;
+    if ('venueId' in body) booking.venueId = body.venueId ?? null;
+    if ('quotedAmountCents' in body && body.quotedAmountCents !== undefined) booking.quotedAmountCents = body.quotedAmountCents;
+    if ('source' in body) booking.source = body.source ?? null;
+    if ('metadata' in body && body.metadata !== undefined) booking.metadata = body.metadata;
+
+    booking.updatedAt = new Date().toISOString();
+    bookings.set(booking);
+
+    writeAudit(ctx, 'booking.update', 'booking', booking.id, booking.businessId, { changed: Object.keys(body) });
+    reply.send({ data: booking });
+  });
+
   app.patch('/bookings/:id/status', {
     schema: {
       body: {

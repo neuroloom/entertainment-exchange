@@ -236,15 +236,17 @@ export async function marketplaceRoutes(app: FastifyInstance) {
 
     // Also create in the DealRoomEngine for full state machine support
     try {
+      const ts = Date.now();
       dealEngine.createDeal(
-        0, // listingId mapping — use 0 as numeric placeholder
-        0, // buyerId mapping
-        0, // sellerId mapping
-        0, // amountCents
+        ts,                                       // listingId — unique timestamp-based sequence
+        ts,                                       // buyerId — numeric placeholder for downstream ref
+        ts,                                       // sellerId — numeric placeholder for downstream ref
+        listing.askingPriceCents ?? body.amountCents ?? 0,
         body.terms,
       );
-    } catch {
+    } catch (err) {
       // DealRoomEngine creation best-effort; route-level store is authoritative
+      req.log?.warn({ err: (err as Error).message }, 'DealRoomEngine.createDeal failed (non-fatal)');
     }
 
     writeAudit(ctx, 'deal.create', 'deal_room', dealId, listing.sellerBusinessId, { buyerUserId: body.buyerUserId });

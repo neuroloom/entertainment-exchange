@@ -18,9 +18,11 @@ const TENANT_A = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa';
 const TENANT_B = 'bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb';
 const BUSINESS_ID = 'cccccccc-cccc-4ccc-cccc-cccccccccccc';
 
-function headers(tenantId: string, permissions: string) {
+function headers(tenantId: string, permissions: string, actorId = 'test-agent-user') {
   return {
     'x-tenant-id': tenantId,
+    'x-actor-id': actorId,
+    'x-actor-type': 'human',
     'x-actor-permissions': permissions,
   };
 }

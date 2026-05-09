@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
+import { withAuth } from '../plugins/auth.plugin.js';
 import { executeAgentRun, getPipelineStats, getPipelineVGDO } from '../services/agent-executor.js';
 import { MemoryStore, AuditStore } from '../services/repo.js';
 import { paginate, paginatedResponse } from '../plugins/paginate.plugin.js';
@@ -192,11 +193,11 @@ export async function agentRoutes(app: FastifyInstance) {
   });
 
   // OMEGA pipeline stats
-  app.get('/pipeline/stats', async (req, reply) => {
+  app.get('/pipeline/stats', { preHandler: withAuth() }, async (req, reply) => {
     reply.send({ data: getPipelineStats() });
   });
 
-  app.get('/pipeline/vgdo', async (req, reply) => {
+  app.get('/pipeline/vgdo', { preHandler: withAuth() }, async (req, reply) => {
     reply.send({ data: getPipelineVGDO() });
   });
 
