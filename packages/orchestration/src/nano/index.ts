@@ -69,3 +69,7 @@ export {
 // NanoAgent (evolution runner wired into OutputMaximizer)
 export { NanoAgent } from './nano-agent.js';
 export type { EpochCallback } from './nano-agent.js';
+
+// AutoOptimizer (autonomous agent self-optimization)
+export { AutoOptimizer, recordMetrics, getLatestMetrics } from './auto-optimizer.js';
+export type { OptimizationCycle, PerformanceSnapshot } from './auto-optimizer.js';

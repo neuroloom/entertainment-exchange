@@ -5,6 +5,21 @@ export { TaskRouter, NgramEmbedder, SkillIndex } from './auto-router.js';
 export { OpenAIEmbeddingProvider, getEmbeddingProvider, setEmbeddingProvider, vectorFallback } from './embeddings.js';
 export type { EmbeddingProvider } from './embeddings.js';
 export { runBenchmark, findMaxThroughput } from './benchmark.js';
+
+// Operations module — Moat 4: Autonomous Operations (self-healing, dynamic pricing)
+export { SelfHealer } from './operations/self-healer.js';
+export { DynamicPricingEngine } from './operations/dynamic-pricing.js';
+export type {
+  AgentHealth,
+  RecoveryAction,
+  AgentRunRecord,
+  CircuitBreakerState,
+  PriceRecommendation,
+  HistoricalDeal,
+  DemandForecast,
+  PricePointAnalysis,
+} from './operations/index.js';
+
 export {
   OMEGA_FLOOR, OMEGA_RED_LOOM, OMEGA_SNP, OMEGA_SEVERANCE,
   H_CACHE_HIT_RATE, WARP_LATENCY_US, S_ISO_THRESHOLD, MAX_CONCURRENT_AGENTS,
@@ -106,6 +121,28 @@ export type {
   FactorDetail,
   BusinessProfile,
 } from './rights/index.js';
+
+// Reputation module — composite scoring, cross-tenant benchmarks, fraud detection (L4 NETWORK EFFECTS)
+export { ReputationEngine, REPUTATION_TIER_THRESHOLDS } from './reputation/index.js';
+export type {
+  ReputationTier,
+  ReputationAuditEvent,
+  ReputationReview,
+  ReputationPassport,
+  ReputationFactor,
+  ReputationScoreFactors,
+  ReputationScore,
+  IndustryBenchmark,
+  FraudIndicator,
+} from './reputation/index.js';
+
+// Data Pipeline — Moat 3: Proprietary Data Network Effects
+export { EmbeddingIndexer, FraudDetector } from './data-pipeline/index.js';
+export type {
+  DomainEmbedding,
+  SimilarityEdge,
+  FraudDetectorStores,
+} from './data-pipeline/index.js';
 
 // Ledger exports
 export {
