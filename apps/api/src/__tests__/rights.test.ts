@@ -298,6 +298,72 @@ describe('Rights routes', () => {
     });
   });
 
+  // ── Revoke Passport ──────────────────────────────────────────────────────
+
+  describe('DELETE /api/v1/rights/passports/:id', () => {
+    let revokeAssetId: string;
+    let revokeAnchorId: string;
+
+    beforeAll(async () => {
+      const anchorRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/rights/anchors',
+        headers: headers(TENANT_A, 'rights:issue'),
+        payload: {
+          documentUri: 'ipfs://QmRevokeAnchor',
+          documentHash: '0xrevoke123',
+          documentType: 'chain_of_title',
+        },
+      });
+      revokeAnchorId = JSON.parse(anchorRes.payload).data.id;
+
+      const assetRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/rights/assets',
+        headers: headers(TENANT_A, 'rights:issue'),
+        payload: {
+          businessId: BUSINESS_ID,
+          assetType: 'film_rights',
+          title: 'Revocable Film',
+        },
+      });
+      revokeAssetId = JSON.parse(assetRes.payload).data.id;
+    });
+
+    it('returns 400 when revoking an already-revoked passport', async () => {
+      // Issue a passport
+      const issueRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/rights/passports',
+        headers: headers(TENANT_A, 'rights:issue'),
+        payload: {
+          rightsAssetId: revokeAssetId,
+          legalAnchorId: revokeAnchorId,
+          passportType: 'distribution_license',
+        },
+      });
+      const passportId = JSON.parse(issueRes.payload).data.id;
+
+      // Revoke it once (should succeed)
+      await app.inject({
+        method: 'DELETE',
+        url: `/api/v1/rights/passports/${passportId}`,
+        headers: headers(TENANT_A, 'rights:issue'),
+      });
+
+      // Try to revoke the already-revoked passport
+      const res = await app.inject({
+        method: 'DELETE',
+        url: `/api/v1/rights/passports/${passportId}`,
+        headers: headers(TENANT_A, 'rights:issue'),
+      });
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.payload);
+      expect(body.error.code).toBe('INVALID_INPUT');
+      expect(body.error.message).toContain('Passport already revoked');
+    });
+  });
+
   // ── Transferability Score ────────────────────────────────────────────────
 
   describe('GET /api/v1/rights/businesses/:id/transferability', () => {

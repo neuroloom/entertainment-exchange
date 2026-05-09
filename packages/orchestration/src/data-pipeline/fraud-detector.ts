@@ -116,10 +116,10 @@ function crossTenantFlags(
 // ─── Cluster detector: flags any map where multiple IDs share the same key ─────
 
 function detectClusters<K>(
-  map: Map<K, string[]>, type: FraudIndicator['type'],
+  map: Map<K, string[]>, type: FraudDetectorIndicator['type'],
   baseConfidence: number, perExtra: number, extraEvidence: Record<string, unknown>,
-): FraudIndicator[] {
-  const out: FraudIndicator[] = [];
+): FraudDetectorIndicator[] {
+  const out: FraudDetectorIndicator[] = [];
   for (const [key, ids] of map) {
     if (ids.length > 1) {
       out.push({
@@ -137,7 +137,7 @@ function detectClusters<K>(
 // ─── Main Class ────────────────────────────────────────────────────────────────
 
 export class FraudDetector {
-  private scanHistory = new Map<string, FraudIndicator[]>();
+  private scanHistory = new Map<string, FraudDetectorIndicator[]>();
   private riskHistory = new Map<string, RiskHistoryEntry[]>();
   private zScoreThreshold = 3.0;
   private rapidWindowMs = 60_000;
@@ -147,10 +147,10 @@ export class FraudDetector {
 
   constructor(private stores: FraudDetectorStores) {}
 
-  scanTenant(tenantId: string): FraudIndicator[] {
+  scanTenant(tenantId: string): FraudDetectorIndicator[] {
     this.totalScans++;
     const stats = this.buildTenantStats(tenantId);
-    const indicators: FraudIndicator[] = [
+    const indicators: FraudDetectorIndicator[] = [
       ...detectClusters(stats.documentHashes, 'duplicate_document', 0.5, 0.2, { tenantId }),
       ...this.detectRapidListings(stats, tenantId),
       ...this.detectValueAnomalies(stats, tenantId),
@@ -162,13 +162,13 @@ export class FraudDetector {
     return indicators;
   }
 
-  scanCrossTenant(): FraudIndicator[] {
+  scanCrossTenant(): FraudDetectorIndicator[] {
     this.totalScans++;
     const tenantIds = new Set<string>();
     for (const it of [this.stores.bookings, this.stores.listings, this.stores.rightsAssets])
       for (const e of it.values()) { const tid = e.tenantId as string; if (tid) tenantIds.add(tid); }
 
-    const indicators: FraudIndicator[] = [
+    const indicators: FraudDetectorIndicator[] = [
       ...crossTenantFlags(
         buildGlobalDocHashes(tenantIds, (tid) => this.buildTenantStats(tid)),
         'hash', 'duplicate_document', 0.7, 0.1, (e) => e.entityId ?? '',
@@ -184,7 +184,7 @@ export class FraudDetector {
   }
 
   getRiskScore(businessId: string): number {
-    const all = new Map<string, FraudIndicator>();
+    const all = new Map<string, FraudDetectorIndicator>();
     for (const indicators of this.scanHistory.values()) {
       for (const ind of indicators) {
         if (ind.entities.includes(businessId) || (ind.evidence as any).tenantId === businessId || (ind.evidence as any).businessId === businessId)
@@ -247,8 +247,8 @@ export class FraudDetector {
 
   // ─── Detection methods ──────────────────────────────────────────────────────
 
-  private detectRapidListings(stats: TenantStats, tenantId: string): FraudIndicator[] {
-    const out: FraudIndicator[] = [];
+  private detectRapidListings(stats: TenantStats, tenantId: string): FraudDetectorIndicator[] {
+    const out: FraudDetectorIndicator[] = [];
     const creates = [...stats.listingCreateTimes].sort((a, b) => a - b);
     const deletes = [...stats.listingDeleteTimes].sort((a, b) => a - b);
 
@@ -276,7 +276,7 @@ export class FraudDetector {
     return out;
   }
 
-  private detectValueAnomalies(stats: TenantStats, tenantId: string): FraudIndicator[] {
+  private detectValueAnomalies(stats: TenantStats, tenantId: string): FraudDetectorIndicator[] {
     if (stats.bookingValues.length < 3) return [];
     const avg = mean(stats.bookingValues);
     const sd = stdDev(stats.bookingValues, avg);

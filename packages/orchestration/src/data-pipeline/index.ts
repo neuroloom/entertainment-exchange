@@ -8,6 +8,6 @@ export type {
   SimilarityEdge,
 } from './embedding-indexer.js';
 export type {
-  FraudIndicator,
+  FraudDetectorIndicator,
   FraudDetectorStores,
 } from './fraud-detector.js';

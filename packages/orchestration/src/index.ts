@@ -167,6 +167,7 @@ export { EmbeddingIndexer, FraudDetector } from './data-pipeline/index.js';
 export type {
   DomainEmbedding,
   SimilarityEdge,
+  FraudDetectorIndicator,
   FraudDetectorStores,
 } from './data-pipeline/index.js';
 
