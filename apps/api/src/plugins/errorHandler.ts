@@ -21,11 +21,11 @@ export class AppError extends Error {
 
 export async function errorHandlerPlugin(app: FastifyInstance) {
   app.setErrorHandler((err: unknown, req, reply) => {
-    const error = err as any;
+    const error = err as { validation?: unknown; code?: string; message?: string; status?: number; details?: Record<string, unknown> } & Error;
 
     if (error instanceof AppError) {
       return reply.status(error.status).send({
-        error: { code: error.code, message: error.message, requestId: (req as any).ctx?.requestId, details: error.details },
+        error: { code: error.code, message: error.message, requestId: req.ctx?.requestId, details: error.details },
       });
     }
 
@@ -33,21 +33,21 @@ export async function errorHandlerPlugin(app: FastifyInstance) {
     if (error instanceof ZodError) {
       const messages = error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
       return reply.status(400).send({
-        error: { code: 'VALIDATION_FAILED', message: messages, requestId: (req as any).ctx?.requestId },
+        error: { code: 'VALIDATION_FAILED', message: messages, requestId: req.ctx?.requestId },
       });
     }
 
     // Fastify native validation errors
     if (error.validation) {
       return reply.status(400).send({
-        error: { code: 'VALIDATION_FAILED', message: error.message, requestId: (req as any).ctx?.requestId },
+        error: { code: 'VALIDATION_FAILED', message: error.message, requestId: req.ctx?.requestId },
       });
     }
 
     const errMsg = (error instanceof Error) ? error.message : String(error);
-    app.log.error({ err: errMsg, code: (error as any)?.code }, 'unhandled error');
+    app.log.error({ err: errMsg, code: error?.code }, 'unhandled error');
     return reply.status(500).send({
-      error: { code: 'INTERNAL', message: 'Internal server error', requestId: (req as any).ctx?.requestId },
+      error: { code: 'INTERNAL', message: 'Internal server error', requestId: req.ctx?.requestId },
     });
   });
 }

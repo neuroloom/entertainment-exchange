@@ -1,17 +1,17 @@
 {
-  "name": "@entertainment-exchange/db",
+  "name": "@entex/db",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "./src/client.ts",
-  "types": "./src/client.ts",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
   "scripts": {
     "migrate": "tsx src/migrate.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "pg": "^8.20.0",
-    "@entertainment-exchange/shared": "*"
+    "@entex/shared": "*"
   },
   "devDependencies": {
     "@types/pg": "^8.11.0",

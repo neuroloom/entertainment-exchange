@@ -249,3 +249,11 @@ export type {
   MerkleProof,
   ComplianceProof,
 } from './cryptographic-audit/index.js';
+
+// Revenue Forecasting — Projection engine for business intelligence
+export { RevenueForecaster } from './forecasting/index.js';
+export type {
+  ForecastInput,
+  MonthlyProjection,
+  ForecastResult,
+} from './forecasting/index.js';

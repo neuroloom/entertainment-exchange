@@ -6,10 +6,10 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
-import { MemoryStore, AuditStore } from '../services/repo.js';
+import { params } from '../plugins/requestContext.js';
+import { MemoryStore } from '../services/repo.js';
 import { paginate, paginatedResponse } from '../plugins/paginate.plugin.js';
-import { DealRoomEngine } from '@entertainment-exchange/orchestration';
-import type { DealState } from '@entertainment-exchange/orchestration';
+import { DealRoomEngine } from '@entex/orchestration';
 
 const CreateListingSchema = z.object({
   sellerBusinessId: z.string().uuid(),
@@ -55,23 +55,52 @@ const validDealTransitions: Record<string, string[]> = {
   escrow_funded: ['completed'],
 };
 
-export const listings = new MemoryStore('listings');
-export const deals = new Map<string, any[]>();
-const dealEngine = new DealRoomEngine();
-const auditEvents = new AuditStore();
-
-function writeAudit(ctx: any, action: string, resourceType: string, resourceId: string, businessId?: string, metadata?: Record<string, unknown>) {
-  auditEvents.push({
-    id: uuid(), tenantId: ctx.tenantId, businessId, actorType: ctx.actor.type,
-    actorId: ctx.actor.id, action, resourceType, resourceId, metadata: metadata ?? {},
-    createdAt: new Date().toISOString(),
-  });
+export interface Listing {
+  id: string;
+  tenantId: string;
+  sellerBusinessId: string;
+  listingType: string;
+  title: string;
+  status: string;
+  askingPriceCents: number | null;
+  evidenceTier: string;
+  metadata: Record<string, unknown>;
+  publishedAt: string | null;
+  createdAt: string;
 }
+
+interface DealEvent {
+  timestamp: string;
+  fromState?: string;
+  toState?: string;
+  action?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface Deal {
+  id: string;
+  tenantId: string;
+  listingId: string;
+  buyerUserId: string | null;
+  sellerBusinessId: string;
+  amountCents: number;
+  status: string;
+  metadata: Record<string, unknown>;
+  events: DealEvent[];
+  createdAt: string;
+}
+
+export const listings = new MemoryStore<Listing>('listings');
+export const deals = new Map<string, Deal[]>();
+const dealEngine = new DealRoomEngine();
+
+
+import { writeAudit } from '../services/audit-helpers.js';
 
 /**
  * Look up a deal by ID across all listing groups, scoped to tenant.
  */
-function findTenantDeal(dealId: string, tenantId: string): { deal: any; listing: any } | null {
+function findTenantDeal(dealId: string, tenantId: string): { deal: Deal; listing: Listing | undefined } | null {
   for (const dlist of deals.values()) {
     const d = dlist.find(dd => dd.id === dealId);
     if (d && d.tenantId === tenantId) {
@@ -98,7 +127,7 @@ export async function marketplaceRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('listing:publish')) throw AppError.forbidden('Missing listing:publish permission');
 
@@ -119,7 +148,7 @@ export async function marketplaceRoutes(app: FastifyInstance) {
   });
 
   app.get('/listings', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     const all = listings.all(ctx.tenantId);
     const p = paginate(req.query);
@@ -128,8 +157,8 @@ export async function marketplaceRoutes(app: FastifyInstance) {
   });
 
   app.get('/listings/:id', async (req, reply) => {
-    const ctx = (req as any).ctx;
-    const l = listings.get((req.params as any).id);
+    const ctx = req.ctx;
+    const l = listings.get(params(req).id);
     if (!l || l.tenantId !== ctx.tenantId) throw AppError.notFound('Listing');
     reply.send({ data: l });
   });
@@ -148,11 +177,11 @@ export async function marketplaceRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('listing:publish')) throw AppError.forbidden('Missing listing:publish permission');
 
-    const listing = listings.get((req.params as any).id);
+    const listing = listings.get(params(req).id);
     if (!listing || listing.tenantId !== ctx.tenantId) throw AppError.notFound('Listing');
 
     if (listing.status !== 'draft') {
@@ -172,11 +201,11 @@ export async function marketplaceRoutes(app: FastifyInstance) {
 
   // Sprint 3b: DELETE /marketplace/listings/:id — delist (set status to 'delisted')
   app.delete('/listings/:id', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('listing:publish')) throw AppError.forbidden('Missing listing:publish permission');
 
-    const listing = listings.get((req.params as any).id);
+    const listing = listings.get(params(req).id);
     if (!listing || listing.tenantId !== ctx.tenantId) throw AppError.notFound('Listing');
 
     listing.status = 'delisted';
@@ -186,11 +215,11 @@ export async function marketplaceRoutes(app: FastifyInstance) {
   });
 
   app.patch('/listings/:id/publish', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('listing:publish')) throw AppError.forbidden('Missing listing:publish permission');
 
-    const listing = listings.get((req.params as any).id);
+    const listing = listings.get(params(req).id);
     if (!listing || listing.tenantId !== ctx.tenantId) throw AppError.notFound('Listing');
 
     listing.status = 'published';
@@ -213,7 +242,7 @@ export async function marketplaceRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('deal:close')) throw AppError.forbidden('Missing deal:close permission');
 
@@ -246,7 +275,7 @@ export async function marketplaceRoutes(app: FastifyInstance) {
       );
     } catch (err) {
       // DealRoomEngine creation best-effort; route-level store is authoritative
-      req.log?.warn({ err: (err as Error).message }, 'DealRoomEngine.createDeal failed (non-fatal)');
+      req.log?.warn({ err: err instanceof Error ? err.message : 'Unknown error' }, 'DealRoomEngine.createDeal failed (non-fatal)');
     }
 
     writeAudit(ctx, 'deal.create', 'deal_room', dealId, listing.sellerBusinessId, { buyerUserId: body.buyerUserId });
@@ -254,9 +283,9 @@ export async function marketplaceRoutes(app: FastifyInstance) {
   });
 
   app.get('/deals', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
-    const allDeals: any[] = [];
+    const allDeals: Deal[] = [];
     for (const d of deals.values()) allDeals.push(...d);
     const tenantDeals = allDeals.filter(d => d.tenantId === ctx.tenantId);
     const p = paginate(req.query);
@@ -265,8 +294,8 @@ export async function marketplaceRoutes(app: FastifyInstance) {
   });
 
   app.get('/deals/:id', async (req, reply) => {
-    const ctx = (req as any).ctx;
-    const dealId = (req.params as any).id;
+    const ctx = req.ctx;
+    const dealId = params(req).id;
     const found = findTenantDeal(dealId, ctx.tenantId);
     if (!found) throw AppError.notFound('Deal');
     reply.send({ data: found.deal });
@@ -284,11 +313,11 @@ export async function marketplaceRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('deal:close')) throw AppError.forbidden('Missing deal:close permission');
 
-    const dealId = (req.params as any).id;
+    const dealId = params(req).id;
     const found = findTenantDeal(dealId, ctx.tenantId);
     if (!found) throw AppError.notFound('Deal');
 
@@ -319,10 +348,10 @@ export async function marketplaceRoutes(app: FastifyInstance) {
 
   // GET /marketplace/deals/:id/timeline — ordered list of state transitions
   app.get('/deals/:id/timeline', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
 
-    const dealId = (req.params as any).id;
+    const dealId = params(req).id;
     const found = findTenantDeal(dealId, ctx.tenantId);
     if (!found) throw AppError.notFound('Deal');
 
@@ -342,7 +371,7 @@ export async function marketplaceRoutes(app: FastifyInstance) {
         dealId,
         currentStatus: found.deal.status,
         transitions: events.sort(
-          (a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+          (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
         ),
       },
     });
@@ -365,11 +394,11 @@ export async function marketplaceRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('deal:close')) throw AppError.forbidden('Missing deal:close permission');
 
-    const dealId = (req.params as any).id;
+    const dealId = params(req).id;
     const found = findTenantDeal(dealId, ctx.tenantId);
     if (!found) throw AppError.notFound('Deal');
 

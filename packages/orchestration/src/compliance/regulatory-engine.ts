@@ -311,7 +311,6 @@ export const RULE_RIGHTS_TRANSFER: ComplianceRule = {
 
         const prevSeq = prev.after.chainSequence as number | undefined;
         const currSeq = curr.after.chainSequence as number | undefined;
-        const prevSupersedes = prev.after.supersedesPassportId as string | undefined;
         const currSupersedes = curr.after.supersedesPassportId as string | undefined;
         const prevPassportId = prev.after.passportId as string | undefined;
 

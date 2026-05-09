@@ -1,4 +1,4 @@
-# Entertainment Business Exchange — Multi-stage Dockerfile
+# EntEx — Multi-stage Dockerfile
 # Stage 1: Build (compile TypeScript)
 FROM node:20 AS build
 

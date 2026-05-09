@@ -1,4 +1,4 @@
--- Entertainment Business Exchange — Initial Schema
+-- EntEx — Initial Schema
 -- Task 003: Full MVP schema with RLS
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 

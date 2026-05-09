@@ -1,6 +1,8 @@
 // Metrics plugin — Prometheus-compatible metrics endpoint at GET /metrics
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 
+const requestTimers = new WeakMap<FastifyRequest, number>();
+
 interface MetricCounter {
   name: string;
   help: string;
@@ -56,14 +58,14 @@ export async function metricsPlugin(app: FastifyInstance) {
 
   // Hook to record request metrics
   app.addHook('onRequest', async (req: FastifyRequest) => {
-    (req as any).__metricsStartTime = Date.now();
+    requestTimers.set(req, Date.now());
   });
 
   app.addHook('onResponse', async (req: FastifyRequest, reply: FastifyReply) => {
     const method = req.method;
     const path = req.routeOptions?.url ?? req.url.split('?')[0];
     const status = String(reply.statusCode);
-    const durationMs = Date.now() - ((req as any).__metricsStartTime as number);
+    const durationMs = Date.now() - (requestTimers.get(req) ?? Date.now());
 
     // Increment counter: method -> path -> status -> count
     let methodMap = httpRequestsTotal.labels.get(method);

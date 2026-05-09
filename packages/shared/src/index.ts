@@ -1,4 +1,4 @@
-// Shared Types — Domain types used by all Entertainment Business Exchange packages
+// Shared Types — Domain types used by all EntEx packages
 // Task 002: Branded IDs, AppError, DomainEvent, RequestContext
 
 // Branded ID types

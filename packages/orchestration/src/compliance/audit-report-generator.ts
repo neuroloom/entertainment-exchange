@@ -690,7 +690,6 @@ export class AuditReportGenerator {
     const revenueReport = this.generateRevenueAudit(tenantId, oneYearAgo, now);
     const taxReport = this.generateTaxFiling(tenantId, new Date().getFullYear());
     const integrity = this.verifyJournalIntegrity(tenantId);
-    const availReport = this.generateAvailabilityAudit(tenantId, oneYearAgo, now);
 
     const subScores: Record<string, number> = {
       soc2Access: accessReport.summary.complianceScore,

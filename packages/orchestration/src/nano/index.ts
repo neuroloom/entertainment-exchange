@@ -3,7 +3,7 @@
 // Wired into the OMEGA OutputMaximizer cache pipeline
 //
 // Usage:
-//   import { NanoAgent, NanoMutationEngine, dnaFromConfig, scoreVGDO } from '@entertainment-exchange/orchestration/nano';
+//   import { NanoAgent, NanoMutationEngine, dnaFromConfig, scoreVGDO } from '@entex/orchestration/nano';
 //
 //   const agent = new NanoAgent(outputMaximizer);
 //   const result = await agent.run({ epochs: 1000 });

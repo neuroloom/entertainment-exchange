@@ -2,7 +2,7 @@
 
 **Status:** accepted
 **Date:** 2026-05-08
-**Author:** Entertainment Exchange team
+**Author:** EntEx team
 
 ## Context
 

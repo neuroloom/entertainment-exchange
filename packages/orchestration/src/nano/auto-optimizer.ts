@@ -9,11 +9,11 @@
 // 5. Record evolution history — immutable audit trail of every mutation decision
 
 import { createHash } from 'node:crypto';
-import type { DNAStrand, EvolvableParams, FitnessGrade, VGDOResult } from './types.js';
-import { DEFAULT_EVOLVABLE_PARAMS, OMEGA_FLOOR } from './types.js';
-import { NanoMutationEngine, mutateParams } from './mutation.js';
+import type { EvolvableParams, VGDOResult } from './types.js';
+import { DEFAULT_EVOLVABLE_PARAMS } from './types.js';
+import { NanoMutationEngine } from './mutation.js';
 import { dnaFromConfig, dnaToVector, dnaFromMutated } from './dna.js';
-import { scoreVGDO, evaluateParams, fitnessGrade } from './fitness.js';
+import { scoreVGDO, evaluateParams } from './fitness.js';
 import { saveCheckpoint } from './checkpoint.js';
 
 // ---------------------------------------------------------------------------

@@ -15,7 +15,6 @@ import type {
   TransactionReceipt,
   AgentPurchaseTransaction,
   AgentReplies,
-  VerificationLevel,
 } from './types.js';
 
 import {

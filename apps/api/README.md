@@ -1,6 +1,6 @@
-# Entertainment Business Exchange — API
+# EntEx — API
 
-Fastify v5 API server for the Entertainment Business Exchange platform. Multi-tenant entertainment booking, marketplace, and rights management powered by the OMEGA orchestration pipeline.
+Fastify v5 API server for the EntEx platform. Multi-tenant entertainment booking, marketplace, and rights management powered by the OMEGA orchestration pipeline.
 
 **v1.0.0** — 50+ endpoints, 165 tests, 7 bounded contexts, 4 ADRs.
 
@@ -111,7 +111,7 @@ Request → requestContext → CORS → authPlugin → sanitizePlugin
 
 ### OMEGA Pipeline
 
-The orchestration stack (`@entertainment-exchange/orchestration`):
+The orchestration stack (`@entex/orchestration`):
 
 - **OutputMaximizer**: dual-layer cache (LRU + SemanticCache), request coalescing, batch processing
 - **SNP Governance**: pattern validation, FED_SYNC receiver

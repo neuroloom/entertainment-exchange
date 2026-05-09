@@ -5,9 +5,10 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
+import { params } from '../plugins/requestContext.js';
 import { withAuth } from '../plugins/auth.plugin.js';
 import { executeAgentRun, getPipelineStats, getPipelineVGDO } from '../services/agent-executor.js';
-import { MemoryStore, AuditStore } from '../services/repo.js';
+import { MemoryStore } from '../services/repo.js';
 import { paginate, paginatedResponse } from '../plugins/paginate.plugin.js';
 
 const CreateAgentSchema = z.object({
@@ -30,17 +31,24 @@ const CreateRunSchema = z.object({
   goal: z.string().min(1),
 });
 
-export const agents = new MemoryStore('agents');
-const agentRuns = new Map<string, any[]>();
-const auditEvents = new AuditStore();
-
-function writeAudit(ctx: any, action: string, resourceType: string, resourceId: string, businessId?: string, metadata?: Record<string, unknown>) {
-  auditEvents.push({
-    id: uuid(), tenantId: ctx.tenantId, businessId, actorType: ctx.actor.type,
-    actorId: ctx.actor.id, action, resourceType, resourceId, metadata: metadata ?? {},
-    createdAt: new Date().toISOString(),
-  });
+export interface Agent {
+  id: string;
+  tenantId: string;
+  businessId: string | undefined;
+  name: string;
+  role: string;
+  autonomyLevel: number;
+  status: string;
+  budgetDailyCents: number;
+  metadata: Record<string, unknown>;
+  createdAt: string;
 }
+
+export const agents = new MemoryStore<Agent>('agents');
+const agentRuns = new Map<string, any[]>();
+
+
+import { writeAudit } from '../services/audit-helpers.js';
 
 export async function agentRoutes(app: FastifyInstance) {
   app.post('/', {
@@ -59,7 +67,7 @@ export async function agentRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('agent:run')) throw AppError.forbidden('Missing agent:run permission');
 
@@ -67,7 +75,7 @@ export async function agentRoutes(app: FastifyInstance) {
     const agentId = uuid();
 
     const agent = {
-      id: agentId, tenantId: ctx.tenantId, businessId: body.businessId ?? null,
+      id: agentId, tenantId: ctx.tenantId, businessId: body.businessId,
       name: body.name, role: body.role,
       autonomyLevel: body.autonomyLevel, status: 'active',
       budgetDailyCents: body.budgetDailyCents, metadata: body.metadata ?? {},
@@ -82,7 +90,7 @@ export async function agentRoutes(app: FastifyInstance) {
 
   // Sprint 3b: pagination with ?limit=&offset=
   app.get('/', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     const all = agents.all(ctx.tenantId);
     const p = paginate(req.query);
@@ -91,8 +99,8 @@ export async function agentRoutes(app: FastifyInstance) {
   });
 
   app.get('/:id', async (req, reply) => {
-    const ctx = (req as any).ctx;
-    const a = agents.get((req.params as any).id);
+    const ctx = req.ctx;
+    const a = agents.get(params(req).id);
     if (!a || a.tenantId !== ctx.tenantId) throw AppError.notFound('Agent');
     reply.send({ data: a });
   });
@@ -112,11 +120,11 @@ export async function agentRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('agent:run')) throw AppError.forbidden('Missing agent:run permission');
 
-    const agent = agents.get((req.params as any).id);
+    const agent = agents.get(params(req).id);
     if (!agent || agent.tenantId !== ctx.tenantId) throw AppError.notFound('Agent');
 
     const body = UpdateAgentSchema.parse(req.body);
@@ -133,11 +141,11 @@ export async function agentRoutes(app: FastifyInstance) {
 
   // Sprint 3b: DELETE /agents/:id — soft-delete (set status to 'inactive')
   app.delete('/:id', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('agent:run')) throw AppError.forbidden('Missing agent:run permission');
 
-    const agent = agents.get((req.params as any).id);
+    const agent = agents.get(params(req).id);
     if (!agent || agent.tenantId !== ctx.tenantId) throw AppError.notFound('Agent');
 
     agent.status = 'inactive';
@@ -158,11 +166,11 @@ export async function agentRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('agent:run')) throw AppError.forbidden('Missing agent:run permission');
 
-    const agent = agents.get((req.params as any).id);
+    const agent = agents.get(params(req).id);
     if (!agent || agent.tenantId !== ctx.tenantId) throw AppError.notFound('Agent');
     if (agent.status !== 'active') throw AppError.invalid('Agent is not active');
 
@@ -203,8 +211,8 @@ export async function agentRoutes(app: FastifyInstance) {
   });
 
   app.get('/:id/runs', async (req, reply) => {
-    const ctx = (req as any).ctx;
-    const agent = agents.get((req.params as any).id);
+    const ctx = req.ctx;
+    const agent = agents.get(params(req).id);
     if (!agent || agent.tenantId !== ctx.tenantId) throw AppError.notFound('Agent');
 
     const runs = agentRuns.get(agent.id) ?? [];
@@ -214,11 +222,11 @@ export async function agentRoutes(app: FastifyInstance) {
   });
 
   app.get('/:id/runs/:runId', async (req, reply) => {
-    const ctx = (req as any).ctx;
-    const agent = agents.get((req.params as any).id);
+    const ctx = req.ctx;
+    const agent = agents.get(params(req).id);
     if (!agent || agent.tenantId !== ctx.tenantId) throw AppError.notFound('Agent');
 
-    const run = (agentRuns.get(agent.id) ?? []).find(r => r.id === (req.params as any).runId);
+    const run = (agentRuns.get(agent.id) ?? []).find(r => r.id === params(req).runId);
     if (!run) throw AppError.notFound('AgentRun');
     reply.send({ data: run });
   });

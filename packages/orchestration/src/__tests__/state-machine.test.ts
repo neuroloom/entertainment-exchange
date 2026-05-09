@@ -7,7 +7,6 @@ import {
   getNextStates,
   BookingStateError,
 } from '../booking/state-machine.js';
-import type { BookingState } from '../booking/state-machine.js';
 
 describe('BOOKING_STATES', () => {
   it('contains all 7 expected states', () => {

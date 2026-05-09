@@ -9,7 +9,7 @@ import { AgentMarketplace } from './marketplace/agent-marketplace.js';
 import { getEmbeddingProvider } from './embeddings.js';
 import type { EmbeddingProvider } from './embeddings.js';
 import {
-  OMEGA_FLOOR, OMEGA_RED_LOOM, WARP_LATENCY_US, S_ISO_THRESHOLD, DEFAULT_OMEGA_CONFIG,
+  OMEGA_FLOOR, OMEGA_RED_LOOM, S_ISO_THRESHOLD, DEFAULT_OMEGA_CONFIG,
 } from './types.js';
 import type {
   OMEGAConfig, InferenceRequest, InferenceResponse, MetricSnapshot,

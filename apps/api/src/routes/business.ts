@@ -5,9 +5,28 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
+import { params } from '../plugins/requestContext.js';
 import { paginate, paginatedResponse } from '../plugins/paginate.plugin.js';
-import { MemoryStore, AuditStore } from '../services/repo.js';
+import { MemoryStore } from '../services/repo.js';
 import { getOrCreateAccounts, journalStore } from './ledger.js';
+import { webhookService } from '../services/webhook.service.js';
+import { bookings } from './booking.js';
+import { RevenueForecaster } from '@entex/orchestration';
+import { writeAudit, sharedAudit } from '../services/audit-helpers.js';
+
+export interface Business {
+  id: string;
+  tenantId: string;
+  name: string;
+  vertical: string;
+  legalName: string | null;
+  status: string;
+  currency: string;
+  timezone: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
 
 const CreateBusinessSchema = z.object({
   name: z.string().min(1),
@@ -22,28 +41,7 @@ const UpdateBusinessSchema = z.object({
 });
 
 // In-memory stores with optional PG write-through
-const businesses = new MemoryStore('businesses');
-const auditEvents = new AuditStore();
-
-function writeAudit(ctx: any, action: string, resourceType: string, resourceId: string, businessId?: string, metadata?: Record<string, unknown>) {
-  auditEvents.push({
-    id: uuid(), tenantId: ctx.tenantId, businessId, actorType: ctx.actor.type,
-    actorId: ctx.actor.id, action, resourceType, resourceId, metadata: metadata ?? {},
-    createdAt: new Date().toISOString(),
-  });
-}
-
-/** Lookup helper for booking reversal — returns code→accountId map for a business.
- *  Imported by booking.ts when creating reversal journal entries.
- *  Uses the ledger's single source of truth for chart of accounts. */
-export function getBusinessAccountMap(businessId: string, tenantId = ''): Map<string, string> {
-  const map = new Map<string, string>();
-  const accounts = getOrCreateAccounts(businessId, tenantId);
-  for (const a of accounts) {
-    map.set(a.code, a.id);
-  }
-  return map;
-}
+export const businesses = new MemoryStore<Business>('businesses');
 
 export async function businessRoutes(app: FastifyInstance) {
   app.post('/businesses', {
@@ -59,7 +57,7 @@ export async function businessRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('business:create')) throw AppError.forbidden('Missing business:create permission');
 
@@ -80,11 +78,17 @@ export async function businessRoutes(app: FastifyInstance) {
     // Audit
     writeAudit(ctx, 'business.create', 'business', businessId, businessId);
 
+    // Webhook: fire-and-forget
+    void webhookService.emit('business.created', {
+      tenantId: ctx.tenantId, resourceId: businessId,
+      payload: { id: businessId, name: body.name, vertical: body.vertical },
+    });
+
     reply.status(201).send({ data: business, accounts });
   });
 
   app.get('/businesses', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
 
     const p = paginate(req.query);
@@ -95,15 +99,15 @@ export async function businessRoutes(app: FastifyInstance) {
   });
 
   app.get('/businesses/:id', async (req, reply) => {
-    const ctx = (req as any).ctx;
-    const b = businesses.get((req.params as any).id);
+    const ctx = req.ctx;
+    const b = businesses.get(params(req).id);
     if (!b || b.tenantId !== ctx.tenantId) throw AppError.notFound('Business');
     reply.send({ data: b });
   });
 
   app.get('/businesses/:id/metrics', async (req, reply) => {
-    const ctx = (req as any).ctx;
-    const businessId = (req.params as any).id;
+    const ctx = req.ctx;
+    const businessId = params(req).id;
     const b = businesses.get(businessId);
     if (!b || b.tenantId !== ctx.tenantId) throw AppError.notFound('Business');
 
@@ -123,7 +127,7 @@ export async function businessRoutes(app: FastifyInstance) {
       for (const entry of journalStore.entries) {
         if (entry.accountId !== accountId) continue;
         // Verify the parent journal belongs to this business
-        const journal = journalStore.journals.find((j: any) => j.id === entry.journalId);
+        const journal = journalStore.journals.find((j) => j.id === entry.journalId);
         if (!journal || journal.businessId !== businessId) continue;
         total += (entry.direction === 'credit' ? entry.amountCents : -entry.amountCents);
       }
@@ -146,6 +150,41 @@ export async function businessRoutes(app: FastifyInstance) {
     });
   });
 
+  // GET /businesses/:id/forecast — revenue forecast for the next 6 months
+  app.get('/businesses/:id/forecast', async (req, reply) => {
+    const ctx = req.ctx;
+    const businessId = params(req).id;
+    const b = businesses.get(businessId);
+    if (!b || b.tenantId !== ctx.tenantId) throw AppError.notFound('Business');
+
+    const query = req.query as Record<string, string>;
+    const months = Math.min(24, Math.max(1, parseInt(query.months ?? '6', 10) || 6));
+
+    const forecaster = new RevenueForecaster();
+
+    // Gather confirmed + pipeline bookings for this business
+    const tenantBookings = bookings.all(ctx.tenantId).filter(bk => bk.businessId === businessId);
+    const confirmed = tenantBookings.filter(bk => bk.status === 'confirmed' || bk.status === 'contracted');
+    const pipeline = tenantBookings.filter(bk => bk.status !== 'confirmed' && bk.status !== 'contracted' &&
+      bk.status !== 'completed' && bk.status !== 'cancelled');
+
+    // Gather journal credit entries for this business
+    const accts = getOrCreateAccounts(businessId, ctx.tenantId);
+    const accountIds = new Set(accts.map(a => a.id));
+    const creditEntries = journalStore.entries.filter(
+      e => accountIds.has(e.accountId) && e.direction === 'credit',
+    );
+
+    const input = {
+      confirmedBookings: confirmed.map(bk => ({ amountCents: bk.quotedAmountCents ?? 0, eventDate: bk.eventDate })),
+      pipelineBookings: pipeline.map(bk => ({ amountCents: bk.quotedAmountCents ?? 0, status: bk.status, eventDate: bk.eventDate })),
+      journalEntries: creditEntries.map(e => ({ amountCents: e.amountCents, direction: e.direction as 'debit' | 'credit', createdAt: e.createdAt ?? '' })),
+    };
+
+    const result = forecaster.forecastBlended(input, months);
+    reply.send({ data: result });
+  });
+
   app.put('/businesses/:id', {
     schema: {
       body: {
@@ -159,11 +198,11 @@ export async function businessRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('business:manage')) throw AppError.forbidden('Missing business:manage permission');
 
-    const b = businesses.get((req.params as any).id);
+    const b = businesses.get(params(req).id);
     if (!b || b.tenantId !== ctx.tenantId) throw AppError.notFound('Business');
 
     const body = UpdateBusinessSchema.parse(req.body);
@@ -179,11 +218,11 @@ export async function businessRoutes(app: FastifyInstance) {
   });
 
   app.delete('/businesses/:id', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('business:manage')) throw AppError.forbidden('Missing business:manage permission');
 
-    const b = businesses.get((req.params as any).id);
+    const b = businesses.get(params(req).id);
     if (!b || b.tenantId !== ctx.tenantId) throw AppError.notFound('Business');
     if (b.status === 'archived') throw AppError.invalid('Business already archived');
 
@@ -197,15 +236,15 @@ export async function businessRoutes(app: FastifyInstance) {
 
   // Audit events endpoint — compliance retrieval for audit:view permission
   app.get('/audit', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('audit:view')) throw AppError.forbidden('Missing audit:view permission');
 
     const query = req.query as Record<string, string>;
-    let events = auditEvents.all(ctx.tenantId);
-    if (query.resourceType) events = events.filter((e: any) => e.resourceType === query.resourceType);
-    if (query.action) events = events.filter((e: any) => e.action === query.action);
-    if (query.businessId) events = events.filter((e: any) => e.businessId === query.businessId);
+    let events = sharedAudit.all(ctx.tenantId);
+    if (query.resourceType) events = events.filter((e) => e.resourceType === query.resourceType);
+    if (query.action) events = events.filter((e) => e.action === query.action);
+    if (query.businessId) events = events.filter((e) => e.businessId === query.businessId);
 
     const p = paginate(req.query);
     const sliced = events.slice(p.offset, p.offset + p.limit);

@@ -5,8 +5,9 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
+import { params } from '../plugins/requestContext.js';
 import { paginate, paginatedResponse } from '../plugins/paginate.plugin.js';
-import { MemoryStore, AuditStore } from '../services/repo.js';
+import { MemoryStore } from '../services/repo.js';
 import { journalStore, getOrCreateAccounts } from './ledger.js';
 import { bookings } from './booking.js';
 import { agents } from './agent.js';
@@ -14,13 +15,14 @@ import { listings, deals } from './marketplace.js';
 import {
   PassportVerifier,
   TransferabilityScorer,
-} from '@entertainment-exchange/orchestration';
+} from '@entex/orchestration';
 import type {
   LegalAnchor,
   RightsAsset,
   RightsPassport,
+  PassportType,
   BusinessProfile,
-} from '@entertainment-exchange/orchestration';
+} from '@entex/orchestration';
 
 const CreateAnchorSchema = z.object({
   documentUri: z.string().min(1),
@@ -44,21 +46,15 @@ const IssuePassportSchema = z.object({
   expiresAt: z.string().optional(),
 });
 
-const anchors = new MemoryStore<LegalAnchor>('legal_anchors');
+export const anchors = new MemoryStore<LegalAnchor>('legal_anchors');
 const assets = new MemoryStore<RightsAsset>('rights_assets');
-const passports = new MemoryStore<RightsPassport>('rights_passports');
-const auditEvents = new AuditStore();
+export const passports = new MemoryStore<RightsPassport>('rights_passports');
+
 
 // Create a shared PassportVerifier backed by the route-level stores
-const passVerifier = new PassportVerifier({ anchors: anchors as any, assets: assets as any, passports: passports as any });
+const passVerifier = new PassportVerifier({ anchors: anchors.toMap(), assets: assets.toMap(), passports: passports.toMap() });
 
-function writeAudit(ctx: any, action: string, resourceType: string, resourceId: string, businessId?: string, metadata?: Record<string, unknown>) {
-  auditEvents.push({
-    id: uuid(), tenantId: ctx.tenantId, businessId, actorType: ctx.actor.type,
-    actorId: ctx.actor.id, action, resourceType, resourceId, metadata: metadata ?? {},
-    createdAt: new Date().toISOString(),
-  });
-}
+import { writeAudit, sharedAudit } from '../services/audit-helpers.js';
 
 export async function rightsRoutes(app: FastifyInstance) {
   // ═══ Legal Anchors ══════════════════════════════════════════════════════════
@@ -77,7 +73,7 @@ export async function rightsRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('rights:issue')) throw AppError.forbidden('Missing rights:issue permission');
 
@@ -94,7 +90,7 @@ export async function rightsRoutes(app: FastifyInstance) {
   });
 
   app.get('/anchors', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     const p = paginate(req.query);
     const all = anchors.all(ctx.tenantId);
@@ -104,8 +100,8 @@ export async function rightsRoutes(app: FastifyInstance) {
   });
 
   app.get('/anchors/:id', async (req, reply) => {
-    const ctx = (req as any).ctx;
-    const a = anchors.get((req.params as any).id);
+    const ctx = req.ctx;
+    const a = anchors.get(params(req).id);
     if (!a || a.tenantId !== ctx.tenantId) throw AppError.notFound('LegalAnchor');
     reply.send({ data: a });
   });
@@ -123,11 +119,11 @@ export async function rightsRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('rights:issue')) throw AppError.forbidden('Missing rights:issue permission');
 
-    const anchor = anchors.get((req.params as any).id);
+    const anchor = anchors.get(params(req).id);
     if (!anchor || anchor.tenantId !== ctx.tenantId) throw AppError.notFound('LegalAnchor');
 
     const body = z.object({
@@ -162,7 +158,7 @@ export async function rightsRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('rights:issue')) throw AppError.forbidden('Missing rights:issue permission');
 
@@ -179,7 +175,7 @@ export async function rightsRoutes(app: FastifyInstance) {
   });
 
   app.get('/assets', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     const p = paginate(req.query);
     const all = assets.all(ctx.tenantId);
@@ -200,11 +196,11 @@ export async function rightsRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('rights:issue')) throw AppError.forbidden('Missing rights:issue permission');
 
-    const asset = assets.get((req.params as any).id);
+    const asset = assets.get(params(req).id);
     if (!asset || asset.tenantId !== ctx.tenantId) throw AppError.notFound('RightsAsset');
 
     const body = z.object({
@@ -222,11 +218,11 @@ export async function rightsRoutes(app: FastifyInstance) {
   });
 
   app.delete('/assets/:id', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('rights:issue')) throw AppError.forbidden('Missing rights:issue permission');
 
-    const asset = assets.get((req.params as any).id);
+    const asset = assets.get(params(req).id);
     if (!asset || asset.tenantId !== ctx.tenantId) throw AppError.notFound('RightsAsset');
 
     const archived = { ...asset, status: 'archived' };
@@ -237,8 +233,8 @@ export async function rightsRoutes(app: FastifyInstance) {
   });
 
   app.get('/assets/:id', async (req, reply) => {
-    const ctx = (req as any).ctx;
-    const a = assets.get((req.params as any).id);
+    const ctx = req.ctx;
+    const a = assets.get(params(req).id);
     if (!a || a.tenantId !== ctx.tenantId) throw AppError.notFound('RightsAsset');
     reply.send({ data: a });
   });
@@ -246,9 +242,9 @@ export async function rightsRoutes(app: FastifyInstance) {
   // ─── Chain of Title endpoint ────────────────────────────────────────────────
 
   app.get('/assets/:id/chain-of-title', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
-    const assetId = (req.params as any).id;
+    const assetId = params(req).id;
     const asset = assets.get(assetId);
     if (!asset || asset.tenantId !== ctx.tenantId) throw AppError.notFound('RightsAsset');
 
@@ -273,7 +269,7 @@ export async function rightsRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('rights:issue')) throw AppError.forbidden('Missing rights:issue permission');
 
@@ -285,7 +281,7 @@ export async function rightsRoutes(app: FastifyInstance) {
     const anchor = anchors.get(body.legalAnchorId);
     if (!anchor || anchor.tenantId !== ctx.tenantId) throw AppError.notFound('LegalAnchor');
 
-    const passportType = body.passportType as any;
+    const passportType = body.passportType as PassportType;
     const passport = passVerifier.issuePassport(
       body.rightsAssetId,
       body.legalAnchorId,
@@ -299,7 +295,7 @@ export async function rightsRoutes(app: FastifyInstance) {
   });
 
   app.get('/passports', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     const p = paginate(req.query);
     const all = passports.all(ctx.tenantId);
@@ -309,8 +305,8 @@ export async function rightsRoutes(app: FastifyInstance) {
   });
 
   app.get('/passports/:id', async (req, reply) => {
-    const ctx = (req as any).ctx;
-    const p = passports.get((req.params as any).id);
+    const ctx = req.ctx;
+    const p = passports.get(params(req).id);
     if (!p || p.tenantId !== ctx.tenantId) throw AppError.notFound('Passport');
 
     // Auto-expiry: check if expiresAt has passed and update status to expired
@@ -328,12 +324,12 @@ export async function rightsRoutes(app: FastifyInstance) {
   // ─── Revoke passport ───────────────────────────────────────────────────────
 
   app.post('/passports/:id/revoke', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('rights:issue')) throw AppError.forbidden('Missing rights:issue permission');
 
     const body = z.object({ reason: z.string().min(1) }).parse(req.body);
-    const passportId = (req.params as any).id;
+    const passportId = params(req).id;
     const passport = passports.get(passportId);
     if (!passport || passport.tenantId !== ctx.tenantId) throw AppError.notFound('Passport');
 
@@ -354,11 +350,11 @@ export async function rightsRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('rights:issue')) throw AppError.forbidden('Missing rights:issue permission');
 
-    const passportId = (req.params as any).id;
+    const passportId = params(req).id;
     const existing = passports.get(passportId);
     if (!existing || existing.tenantId !== ctx.tenantId) throw AppError.notFound('Passport');
 
@@ -381,11 +377,11 @@ export async function rightsRoutes(app: FastifyInstance) {
   });
 
   app.delete('/passports/:id', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('rights:issue')) throw AppError.forbidden('Missing rights:issue permission');
 
-    const passport = passports.get((req.params as any).id);
+    const passport = passports.get(params(req).id);
     if (!passport || passport.tenantId !== ctx.tenantId) throw AppError.notFound('Passport');
     if (passport.status === 'revoked') throw AppError.invalid('Passport already revoked');
 
@@ -400,9 +396,9 @@ export async function rightsRoutes(app: FastifyInstance) {
   // ═══ Business Transferability Scoring ════════════════════════════════════════
 
   app.get('/businesses/:id/transferability', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
-    const businessId = (req.params as any).id;
+    const businessId = params(req).id;
 
     // Collect business profile from across the rights store
     const businessAssets = assets.all(ctx.tenantId).filter(a => a.businessId === businessId);
@@ -433,14 +429,14 @@ export async function rightsRoutes(app: FastifyInstance) {
       return min === null ? days : Math.min(min, days);
     }, null);
 
-    const hasDisputes = auditEvents.some(
+    const hasDisputes = sharedAudit.some(
       e => e.businessId === businessId && e.action.includes('dispute'),
     );
-    const disputeCount = auditEvents.filter(
+    const disputeCount = sharedAudit.filter(
       e => e.businessId === businessId && e.action.includes('dispute'),
     ).length;
 
-    const firstAudit = auditEvents.find(e => e.businessId === businessId);
+    const firstAudit = sharedAudit.find(e => e.businessId === businessId);
     const platformTenureDays = firstAudit
       ? Math.ceil((Date.now() - new Date(firstAudit.createdAt).getTime()) / 86_400_000)
       : 0;
@@ -448,7 +444,7 @@ export async function rightsRoutes(app: FastifyInstance) {
     // ── Compute revenue history from journal entries ──────────────────────────
     const bizJournals = journalStore.listJournals(ctx.tenantId, businessId);
     const accts = getOrCreateAccounts(businessId, ctx.tenantId);
-    const revenueAcct = accts.find((a: any) => a.code === '4000');
+    const revenueAcct = accts.find((a) => a.code === '4000');
     let revenueHistoryMonths = 0;
     let totalRevenueCents = 0;
     if (revenueAcct && bizJournals.length > 0) {
@@ -474,38 +470,38 @@ export async function rightsRoutes(app: FastifyInstance) {
 
     // ── Marketplace listings for this business ─────────────────────────────────
     const marketplaceListings = listings.all(ctx.tenantId).filter(
-      (l: any) => l.sellerBusinessId === businessId,
+      l => l.sellerBusinessId === businessId,
     ).length;
 
     // ── Marketplace sales (deals for this business) ────────────────────────────
     let marketplaceSales = 0;
     for (const dlist of deals.values()) {
-      const bizDeals = dlist.filter((d: any) =>
+      const bizDeals = dlist.filter(d =>
         d.tenantId === ctx.tenantId &&
-        (d.sellerBusinessId === businessId || d.buyerBusinessId === businessId),
+        d.sellerBusinessId === businessId,
       );
       marketplaceSales += bizDeals.length;
     }
 
     // ── Agent automation level (avg autonomyLevel of active agents) ────────────
     const bizAgents = agents.all(ctx.tenantId).filter(
-      (a: any) => a.businessId === businessId && a.status === 'active',
+      a => a.businessId === businessId && a.status === 'active',
     );
     let agentAutomationLevel = 0;
     if (bizAgents.length > 0) {
-      const totalAutonomy = bizAgents.reduce((sum: number, a: any) => sum + (a.autonomyLevel ?? 0), 0);
+      const totalAutonomy = bizAgents.reduce((sum, a) => sum + (a.autonomyLevel ?? 0), 0);
       // Convert from 0-5 scale to 0-100 for the scorer
       agentAutomationLevel = Math.round((totalAutonomy / bizAgents.length) * 20);
     }
 
     // ── Booking completion rate ────────────────────────────────────────────────
     const bizBookings = bookings.all(ctx.tenantId).filter(
-      (b: any) => b.businessId === businessId,
+      b => b.businessId === businessId,
     );
     let bookingCompletionRate = 0;
     if (bizBookings.length > 0) {
       const completed = bizBookings.filter(
-        (b: any) => b.status === 'completed',
+        b => b.status === 'completed',
       ).length;
       bookingCompletionRate = Math.round((completed / bizBookings.length) * 100) / 100;
     }

@@ -9,7 +9,6 @@ import type {
   HeartbeatConfig,
   HeartbeatSignal,
   CompanyHealth,
-  AgentStatus,
 } from './types.js';
 
 export class HeartbeatEmitter extends EventEmitter {

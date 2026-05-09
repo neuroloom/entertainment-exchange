@@ -76,8 +76,6 @@ export interface DealEvent {
 
 // ─── Transition Table ────────────────────────────────────────────────────────
 
-type Edge = DealState[];
-
 const VALID_TRANSITIONS: Record<DealState, DealState[]> = {
   created:              ['offer_submitted', 'cancelled'],
   offer_submitted:      ['offer_accepted', 'rejected', 'expired', 'cancelled'],

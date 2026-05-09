@@ -104,9 +104,9 @@ describe('AuditStore', () => {
     });
     const all = audit.all();
     expect(all.length).toBeGreaterThan(0);
-    const found = all.find((e: any) => e.id === 'evt-1');
+    const found = all.find(e => e.id === 'evt-1');
     expect(found).toBeDefined();
-    expect(found.action).toBe('create');
+    expect(found!.action).toBe('create');
   });
 
   it('all filters by tenantId', () => {
@@ -127,9 +127,9 @@ describe('AuditStore', () => {
   });
 
   it('find returns first event matching predicate', () => {
-    const found = audit.find((e: any) => e.actorType === 'agent');
+    const found = audit.find(e => e.actorType === 'agent');
     expect(found).toBeDefined();
-    expect(found.actorType).toBe('agent');
+    expect(found!.actorType).toBe('agent');
   });
 
   it('find returns undefined when no match', () => {

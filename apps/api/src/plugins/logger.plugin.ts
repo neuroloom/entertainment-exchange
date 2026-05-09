@@ -1,6 +1,5 @@
 // Logger plugin — structured JSON logger wrapping Fastify's pino
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type { RequestContext } from './requestContext.js';
 
 export interface LogMeta {
   [key: string]: unknown;
@@ -23,17 +22,6 @@ export interface StructuredLogger {
   info(msg: string, meta?: LogMeta): void;
   warn(msg: string, meta?: LogMeta): void;
   error(msg: string, meta?: LogMeta): void;
-}
-
-function getContext(req: FastifyRequest | undefined): Partial<RequestContext> {
-  if (!req) return {};
-  const ctx = (req as any).ctx as RequestContext | undefined;
-  if (!ctx) return {};
-  return {
-    requestId: ctx.requestId,
-    traceId: ctx.traceId,
-    tenantId: ctx.tenantId,
-  };
 }
 
 /** Recursively redact sensitive keys from an object */
@@ -82,7 +70,7 @@ export async function loggerPlugin(app: FastifyInstance) {
 
   // Add a hook to log each request with context fields
   app.addHook('onRequest', async (req: FastifyRequest) => {
-    const ctx = (req as any).ctx as RequestContext | undefined;
+    const ctx = req.ctx;
     log.info('incoming request', {
       requestId: ctx?.requestId,
       traceId: ctx?.traceId,
@@ -93,7 +81,7 @@ export async function loggerPlugin(app: FastifyInstance) {
   });
 
   app.addHook('onResponse', async (req: FastifyRequest, reply) => {
-    const ctx = (req as any).ctx as RequestContext | undefined;
+    const ctx = req.ctx;
     log.info('request completed', {
       requestId: ctx?.requestId,
       traceId: ctx?.traceId,

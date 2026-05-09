@@ -3,8 +3,8 @@
 // Tests cache tiers, batch sizes, and concurrency levels
 
 import { OutputMaximizer } from './output-maximizer.js';
-import { DEFAULT_OMEGA_CONFIG, OMEGA_FLOOR } from './types.js';
-import type { InferenceRequest, InferenceResponse } from './types.js';
+import { DEFAULT_OMEGA_CONFIG } from './types.js';
+import type { InferenceRequest } from './types.js';
 
 const SAMPLE_PROMPTS = [
   'Generate a TypeScript interface for a double-entry ledger journal entry',
@@ -16,7 +16,7 @@ const SAMPLE_PROMPTS = [
   'Create a Zod schema for validating rights passport issuance',
   'Explain how OMEGA_FLOOR governs pattern acceptance in FED_SYNC',
   'Optimize a batch processor for 128 concurrent inference requests',
-  'Generate a seed script that exercises all 8 domains of the Entertainment Business Exchange',
+  'Generate a seed script that exercises all 8 domains of the EntEx',
   'How does the semantic cache achieve 99.95% hit rate?',
   'Implement a cosine similarity function optimized for 1536-dim vectors',
   'Write a Fastify route handler for posting balanced ledger journals',

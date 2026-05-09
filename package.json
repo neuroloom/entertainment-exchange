@@ -1,5 +1,5 @@
 {
-  "name": "entertainment-business-exchange",
+  "name": "entex",
   "private": true,
   "workspaces": [
     "packages/*",

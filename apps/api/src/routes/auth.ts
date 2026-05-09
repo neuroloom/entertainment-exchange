@@ -107,7 +107,7 @@ export async function authRoutes(app: FastifyInstance) {
     const membershipId = uuid();
     memberships.set({ id: membershipId, tenantId, userId, role: 'tenant_admin' });
 
-    (req as any).ctx = {
+    req.ctx = {
       requestId: uuid(), traceId: uuid(),
       tenantId, actor: { type: 'human', id: userId, userId, roles: ['tenant_admin'], permissions: ['business:create', 'business:manage'] },
     };
@@ -145,7 +145,7 @@ export async function authRoutes(app: FastifyInstance) {
     const refreshToken = generateRefreshToken();
     persistRefreshToken(refreshToken, user.id, user.tenantId, refreshTokenExpiresAt());
 
-    (req as any).ctx = {
+    req.ctx = {
       requestId: uuid(), traceId: uuid(),
       tenantId: user.tenantId,
       actor: { type: 'human', id: user.id, userId: user.id, roles: [user.role], permissions },
@@ -181,7 +181,8 @@ export async function authRoutes(app: FastifyInstance) {
   });
 
   app.get('/me', { preHandler: withAuth() }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
+    if (!ctx.actor.userId) throw AppError.unauthenticated('User identity required');
     const user = users.get(ctx.actor.userId);
     if (!user) throw AppError.notFound('User');
     // Never expose password hash

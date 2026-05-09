@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Entertainment Business Exchange API",
+    "title": "EntEx API",
     "version": "1.0.0",
     "description": "Multi-tenant platform for entertainment booking, rights management, agent marketplace, and double-entry ledger."
   },

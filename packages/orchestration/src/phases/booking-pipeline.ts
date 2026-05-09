@@ -1,5 +1,5 @@
 // Phase 1: Intelligent Booking Pipeline
-// Integrates OMEGA orchestration with the Entertainment Exchange booking flow
+// Integrates OMEGA orchestration with the EntEx booking flow
 // Tests: AutoRouter classification → WarpCache memoization → BatchProcessor posting → VGDO scoring
 
 import { OutputMaximizer } from '../output-maximizer.js';

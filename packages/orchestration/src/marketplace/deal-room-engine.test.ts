@@ -1,7 +1,6 @@
 // L3 Marketplace Tests: EvidenceValidator + DealRoomEngine
 import { describe, it, expect } from 'vitest';
 import { EvidenceValidator, DealRoomEngine } from './index.js';
-import type { EvidenceTier } from './index.js';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Evidence Validator

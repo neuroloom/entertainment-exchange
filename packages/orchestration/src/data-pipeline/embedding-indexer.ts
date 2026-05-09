@@ -270,7 +270,6 @@ export class EmbeddingIndexer {
     if (entries.length < 2) return [];
 
     const edges: SimilarityEdge[] = [];
-    const seen = new Set<string>();
 
     for (let i = 0; i < entries.length; i++) {
       for (let j = i + 1; j < entries.length; j++) {

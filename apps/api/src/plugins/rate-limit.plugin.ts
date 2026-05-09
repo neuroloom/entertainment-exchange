@@ -71,9 +71,16 @@ export async function rateLimitPlugin(
     }
     bucket.lastRefill = now;
 
+    // Rate limit headers on all responses
+    const resetTime = Math.ceil((now + (opts.max - bucket.tokens) / refillRate) / 1000);
+    reply.header('X-RateLimit-Limit', opts.max);
+    reply.header('X-RateLimit-Remaining', Math.max(0, Math.floor(bucket.tokens)));
+    reply.header('X-RateLimit-Reset', resetTime);
+
     // Consume 1 token per request
     if (bucket.tokens < 1) {
       const retryAfter = Math.ceil((1 - bucket.tokens) / refillRate / 1000);
+      reply.header('Retry-After', String(retryAfter));
       return reply.status(429).send({
         error: {
           code: 'RATE_LIMITED',

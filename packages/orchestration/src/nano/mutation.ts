@@ -2,9 +2,8 @@
 // Ported from neuroloom-nano/evolution/mutation_engine.py
 
 import { createHash } from 'node:crypto';
-import { randomBytes } from 'node:crypto';
-import type { DNAStrand, EvolvableParams, MutatedDNA, PIDState, SafetyMetrics, MutationTrackingSummary, MutationProtocol } from './types.js';
-import { DEFAULT_PID, DEFAULT_EVOLVABLE_PARAMS, MUTATION_BETA_1_MAX_NORMAL, OMEGA_FLOOR } from './types.js';
+import type { EvolvableParams, MutatedDNA, PIDState, SafetyMetrics, MutationTrackingSummary, MutationProtocol } from './types.js';
+import { DEFAULT_PID, MUTATION_BETA_1_MAX_NORMAL, OMEGA_FLOOR } from './types.js';
 
 const NUCLEOTIDES = ['A', 'T', 'G', 'C'] as const;
 

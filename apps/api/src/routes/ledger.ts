@@ -4,13 +4,27 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
+import { params } from '../plugins/requestContext.js';
 import { paginate, paginatedResponse } from '../plugins/paginate.plugin.js';
 import {
   idempotencyStore,
   getRecipeForEvent,
   RevenueSchedule,
-} from '@entertainment-exchange/orchestration';
-import { AuditStore, JournalStore } from '../services/repo.js';
+} from '@entex/orchestration';
+import { JournalStore } from '../services/repo.js';
+import type { JournalEntryRecord } from '../services/repo.js';
+
+export interface Account {
+  id: string;
+  tenantId: string;
+  businessId: string;
+  code: string;
+  name: string;
+  accountType: string;
+  currency: string;
+  status: string;
+  isDefault: boolean;
+}
 
 const PostJournalSchema = z.object({
   businessId: z.string().uuid(),
@@ -25,20 +39,14 @@ const PostJournalSchema = z.object({
   occurredAt: z.string().optional(),
 });
 
-const accounts = new Map<string, any[]>();
+const accounts = new Map<string, Account[]>();
 export const journalStore = new JournalStore();
-const revenueEvents: any[] = [];
-const auditEvents = new AuditStore();
+const revenueEvents: Array<Record<string, unknown>> = [];
+
 
 const revenueSchedule = new RevenueSchedule();
 
-function writeAudit(ctx: any, action: string, resourceType: string, resourceId: string, businessId?: string, metadata?: Record<string, unknown>) {
-  auditEvents.push({
-    id: uuid(), tenantId: ctx.tenantId, businessId, actorType: ctx.actor.type,
-    actorId: ctx.actor.id, action, resourceType, resourceId, metadata: metadata ?? {},
-    createdAt: new Date().toISOString(),
-  });
-}
+import { writeAudit } from '../services/audit-helpers.js';
 
 function seedDefaultAccounts(businessId: string, tenantId: string) {
   if (accounts.has(businessId)) return;
@@ -59,32 +67,41 @@ function seedDefaultAccounts(businessId: string, tenantId: string) {
  * Get or create the default chart of accounts for a business.
  * This is the single source of truth for chart of accounts, shared by business.ts and ledger.ts.
  */
-export function getOrCreateAccounts(businessId: string, tenantId: string): any[] {
+export function getOrCreateAccounts(businessId: string, tenantId: string): Account[] {
   seedDefaultAccounts(businessId, tenantId);
   return accounts.get(businessId) ?? [];
 }
 
+/** Build a code→id lookup map from the chart of accounts */
+export function getBusinessAccountMap(businessId: string, tenantId = ''): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const a of getOrCreateAccounts(businessId, tenantId)) {
+    map.set(a.code, a.id);
+  }
+  return map;
+}
+
 export async function ledgerRoutes(app: FastifyInstance) {
   app.get('/accounts', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
-    const businessId = (req.query as any)?.businessId;
+    const businessId = (req.query as Record<string, string>)?.businessId;
     if (!businessId) throw AppError.invalid('businessId query parameter required');
 
     seedDefaultAccounts(businessId, ctx.tenantId);
-    const all = (accounts.get(businessId) ?? []).filter((a: any) => a.status !== 'archived');
+    const all = (accounts.get(businessId) ?? []).filter((a) => a.status !== 'archived');
     reply.send({ data: all });
   });
 
   app.get('/accounts/:id', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
-    const businessId = (req.query as any)?.businessId;
+    const businessId = (req.query as Record<string, string>)?.businessId;
     if (!businessId) throw AppError.invalid('businessId query parameter required');
 
     seedDefaultAccounts(businessId, ctx.tenantId);
-    const accts = (accounts.get(businessId) ?? []).filter((a: any) => a.status !== 'archived');
-    const account = accts.find((a: any) => a.id === (req.params as any).id);
+    const accts = (accounts.get(businessId) ?? []).filter((a) => a.status !== 'archived');
+    const account = accts.find((a) => a.id === params(req).id);
     if (!account) throw AppError.notFound('Account');
     reply.send({ data: account });
   });
@@ -106,7 +123,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('payment:create')) throw AppError.forbidden('Missing payment:create permission');
 
@@ -122,7 +139,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
     const accts = accounts.get(body.businessId) ?? [];
 
     // Prevent duplicate codes
-    if (accts.some((a: any) => a.code === body.code && a.status !== 'archived')) {
+    if (accts.some((a) => a.code === body.code && a.status !== 'archived')) {
       throw AppError.invalid(`Account code "${body.code}" already exists for this business`);
     }
 
@@ -153,7 +170,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('payment:create')) throw AppError.forbidden('Missing payment:create permission');
 
@@ -164,11 +181,11 @@ export async function ledgerRoutes(app: FastifyInstance) {
     }).parse(req.body);
 
     // Find the account across all business account groups
-    const accountId = (req.params as any).id;
-    let foundAcct: any = null;
+    const accountId = params(req).id;
+    let foundAcct: Account | null = null;
     let foundBizId: string | null = null;
     for (const [bizId, accts] of accounts.entries()) {
-      const a = accts.find((aa: any) => aa.id === accountId && aa.tenantId === ctx.tenantId);
+      const a = accts.find((aa) => aa.id === accountId && aa.tenantId === ctx.tenantId);
       if (a) { foundAcct = a; foundBizId = bizId; break; }
     }
     if (!foundAcct) throw AppError.notFound('Account');
@@ -181,7 +198,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
     if (body.code !== undefined) {
       // Prevent duplicate codes
       const accts = accounts.get(foundBizId!) ?? [];
-      if (accts.some((a: any) => a.id !== accountId && a.code === body.code && a.status !== 'archived')) {
+      if (accts.some((a) => a.id !== accountId && a.code === body.code && a.status !== 'archived')) {
         throw AppError.invalid(`Account code "${body.code}" already exists for this business`);
       }
       foundAcct.code = body.code;
@@ -196,14 +213,14 @@ export async function ledgerRoutes(app: FastifyInstance) {
   });
 
   app.delete('/accounts/:id', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('payment:create')) throw AppError.forbidden('Missing payment:create permission');
 
-    const accountId = (req.params as any).id;
-    let foundAcct: any = null;
+    const accountId = params(req).id;
+    let foundAcct: Account | null = null;
     for (const accts of accounts.values()) {
-      const a = accts.find((aa: any) => aa.id === accountId && aa.tenantId === ctx.tenantId);
+      const a = accts.find((aa) => aa.id === accountId && aa.tenantId === ctx.tenantId);
       if (a) { foundAcct = a; break; }
     }
     if (!foundAcct) throw AppError.notFound('Account');
@@ -248,7 +265,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('payment:create')) throw AppError.forbidden('Missing payment:create permission');
 
@@ -268,7 +285,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
     seedDefaultAccounts(body.businessId, ctx.tenantId);
     const accts = accounts.get(body.businessId) ?? [];
     for (const entry of body.entries) {
-      if (!accts.some((a: any) => a.id === entry.accountId)) {
+      if (!accts.some((a) => a.id === entry.accountId)) {
         throw AppError.invalid(`Unknown account ID: ${entry.accountId}`);
       }
     }
@@ -301,9 +318,9 @@ export async function ledgerRoutes(app: FastifyInstance) {
   });
 
   app.get('/journals', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
-    const businessId = (req.query as any)?.businessId;
+    const businessId = (req.query as Record<string, string>)?.businessId;
     const p = paginate(req.query);
     const all = journalStore.listJournals(ctx.tenantId, businessId);
     const sliced = all.slice(p.offset, p.offset + p.limit);
@@ -312,19 +329,19 @@ export async function ledgerRoutes(app: FastifyInstance) {
   });
 
   app.get('/journals/:id', async (req, reply) => {
-    const ctx = (req as any).ctx;
-    const j = journalStore.getJournal((req.params as any).id);
+    const ctx = req.ctx;
+    const j = journalStore.getJournal(params(req).id);
     if (!j || j.tenantId !== ctx.tenantId) throw AppError.notFound('Journal');
     const journalEntries = journalStore.getEntries(j.id);
     reply.send({ data: { journal: j, entries: journalEntries } });
   });
 
   app.get('/entries', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
-    const journalId = (req.query as any)?.journalId;
+    const journalId = (req.query as Record<string, string>)?.journalId;
 
-    let filtered: any[];
+    let filtered: JournalEntryRecord[];
     if (journalId) {
       // Validate the journal exists and belongs to this tenant
       const j = journalStore.getJournal(journalId);
@@ -343,17 +360,17 @@ export async function ledgerRoutes(app: FastifyInstance) {
   });
 
   app.get('/revenue', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
-    const businessId = (req.query as any)?.businessId;
+    const businessId = (req.query as Record<string, string>)?.businessId;
     const filtered = revenueEvents.filter(e => e.tenantId === ctx.tenantId && (!businessId || e.businessId === businessId));
     reply.send({ data: filtered });
   });
 
   app.get('/revenue/schedule', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
-    const businessId = (req.query as any)?.businessId;
+    const businessId = (req.query as Record<string, string>)?.businessId;
     if (!businessId) throw AppError.invalid('businessId query parameter required');
 
     const recognizable = revenueSchedule.getRecognizableRevenue(businessId);
@@ -371,7 +388,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('payment:create')) throw AppError.forbidden('Missing payment:create permission');
 
@@ -421,7 +438,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('payment:create')) throw AppError.forbidden('Missing payment:create permission');
 
@@ -496,7 +513,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
 function accountIdByCode(businessId: string, tenantId: string, code: string): string {
   seedDefaultAccounts(businessId, tenantId);
   const accts = accounts.get(businessId) ?? [];
-  const found = accts.find((a: any) => a.code === code);
+  const found = accts.find((a) => a.code === code);
   if (!found) {
     throw AppError.invalid(`Account code not found: ${code}. Ensure default accounts are seeded.`);
   }

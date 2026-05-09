@@ -1,4 +1,4 @@
-# Entertainment Business Exchange -- Deployment Guide
+# EntEx -- Deployment Guide
 
 ## Prerequisites
 
@@ -157,7 +157,7 @@ Create `/etc/systemd/system/entx-api.service`:
 
 ```ini
 [Unit]
-Description=Entertainment Business Exchange API
+Description=EntEx API
 After=network.target postgresql.service
 
 [Service]

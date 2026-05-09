@@ -58,7 +58,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       });
       if (!res.ok) return texts.map(t => vectorFallback(t, this.dimensions));
       const json = await res.json();
-      return json.data?.map((d: any) => d.embedding) ?? texts.map(t => vectorFallback(t, this.dimensions));
+      return json.data?.map((d: { embedding: number[] }) => d.embedding) ?? texts.map(t => vectorFallback(t, this.dimensions));
     } catch {
       return texts.map(t => vectorFallback(t, this.dimensions));
     }

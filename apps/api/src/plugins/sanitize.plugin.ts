@@ -95,7 +95,7 @@ export async function sanitizePlugin(app: FastifyInstance) {
     // Layer 0: Bidi/XSS sanitization
     if (req.body && typeof req.body === 'object') {
       const sanitized = sanitizeValue(req.body, 'request body');
-      req.body = sanitized as any;
+      req.body = sanitized;
     }
 
     if (req.query) {
@@ -108,7 +108,7 @@ export async function sanitizePlugin(app: FastifyInstance) {
       }
     }
 
-    (req.ctx as any).sanitized = true;
+    req.ctx.sanitized = true;
 
     // Layer 1: Regex injection scan across all string fields in body+query
     const allStrings: string[] = [];

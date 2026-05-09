@@ -2,7 +2,7 @@
 // OMEGA_FLOOR (0.999999) governs all pattern acceptance
 
 import {
-  OMEGA_FLOOR, OMEGA_RED_LOOM, OMEGA_SNP, OMEGA_SEVERANCE,
+  OMEGA_FLOOR,
   GDO_WEIGHT_OMEGA, GDO_WEIGHT_DNA, GDO_WEIGHT_S_ISO, GDO_WEIGHT_DELTA_C,
 } from './types.js';
 import type { FedSyncPattern, FedSyncBroadcast, VGDOScore } from './types.js';

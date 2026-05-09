@@ -6,7 +6,6 @@
 
 import { LRUCache, SemanticCache, MetricsCollector } from './warp-cache.js';
 import { NgramEmbedder } from './auto-router.js';
-import { OMEGA_FLOOR } from './types.js';
 import type { MetricSnapshot } from './types.js';
 
 interface ToolCall {

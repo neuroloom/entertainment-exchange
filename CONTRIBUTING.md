@@ -1,9 +1,9 @@
-# Contributing to Entertainment Business Exchange
+# Contributing to EntEx
 
 ## Project Structure
 
 ```
-entertainment-exchange/
+entex/
   apps/
     api/                          # Fastify v5 API server
       src/
@@ -62,8 +62,8 @@ entertainment-exchange/
 
 ```bash
 # 1. Clone and install
-git clone <repo-url> entertainment-exchange
-cd entertainment-exchange
+git clone <repo-url> entex
+cd entex
 npm install
 
 # 2. Configure environment

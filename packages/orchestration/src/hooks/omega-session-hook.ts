@@ -18,10 +18,6 @@
 //     }
 //   }
 
-import { createRequire } from 'node:module';
-
-const require = createRequire(import.meta.url);
-
 // Inline LRU to avoid dependency loading in hook context
 class MiniCache {
   private store = new Map<string, { value: string; ts: number }>();

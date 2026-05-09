@@ -3,23 +3,18 @@
 // Ported from neuroloom-nano/nano_claw.py (1481 lines) — 55+ slash commands
 // Invoke: npx tsx src/nano/nano-cli.ts <subcommand> [options]
 
-import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { NanoAgent } from './nano-agent.js';
 import type { EpochCallback } from './nano-agent.js';
 import { NanoMutationEngine } from './mutation.js';
-import { dnaFromConfig, dnaToVector, validateDNA, dnaFromMutated, dnaHash } from './dna.js';
-import { scoreVGDO, evaluateParams, fitnessGrade, cosineSimilarity } from './fitness.js';
+import { dnaFromConfig, dnaToVector, dnaFromMutated, dnaHash } from './dna.js';
+import { scoreVGDO, evaluateParams, cosineSimilarity } from './fitness.js';
 import {
-  saveCheckpoint, loadLatestCheckpoint, loadCheckpointByStep,
-  listCheckpoints, listSessions, resumeLatestSession, checkpointCount,
+  loadLatestCheckpoint, listCheckpoints, listSessions, resumeLatestSession, checkpointCount,
 } from './checkpoint.js';
-import type {
-  EvolvableParams, EvolutionResult, EpochRecord, FitnessGrade,
-  CheckpointEntry, CheckpointSummary, SessionSummary, MutatedDNA,
-} from './types.js';
+import type { EvolvableParams, EvolutionResult } from './types.js';
 import {
   DEFAULT_EVOLVABLE_PARAMS, DEFAULT_EVOLUTION_OPTIONS,
   OMEGA_FLOOR, GRADE_THRESHOLDS,

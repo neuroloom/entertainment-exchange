@@ -2,7 +2,7 @@
 // Target: 99.95% hit rate (H_CACHE_HIT_RATE), 326µs latency (WARP_LATENCY_US)
 
 import { cosineSimilarity } from './omega-governance.js';
-import { H_CACHE_HIT_RATE, S_ISO_THRESHOLD } from './types.js';
+import { S_ISO_THRESHOLD } from './types.js';
 import type { CacheEntry, SemanticCacheEntry, MetricSnapshot } from './types.js';
 
 export class LRUCache<K = string, V = unknown> {

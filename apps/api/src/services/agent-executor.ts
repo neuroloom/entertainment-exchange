@@ -3,10 +3,9 @@
 // AutoRouter selects cheapest capable model for the task.
 
 import Anthropic from '@anthropic-ai/sdk';
-import { OutputMaximizer } from '../../../../packages/orchestration/src/output-maximizer.js';
-import { TaskRouter } from '../../../../packages/orchestration/src/auto-router.js';
-import { computeVGDO } from '../../../../packages/orchestration/src/omega-governance.js';
-import type { InferenceRequest, InferenceResponse, VGDOScore } from '../../../../packages/orchestration/src/types.js';
+import { OutputMaximizer } from '@entex/orchestration';
+import { computeVGDO } from '@entex/orchestration';
+import type { InferenceRequest, MetricSnapshot, VGDOScore } from '@entex/orchestration';
 
 const anthropic = new Anthropic({
   baseURL: process.env.ANTHROPIC_BASE_URL ?? 'https://api.anthropic.com',
@@ -137,7 +136,7 @@ Budget: ${ctx.budgetCents} cents. Role: ${route.subtype}. Be thorough but cost-e
   };
 }
 
-export function getPipelineStats() {
+export function getPipelineStats(): MetricSnapshot {
   return getPipeline().getStats();
 }
 

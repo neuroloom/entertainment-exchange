@@ -2,11 +2,11 @@
 
 **Status:** accepted
 **Date:** 2026-05-08
-**Author:** Entertainment Exchange team
+**Author:** EntEx team
 
 ## Context
 
-The Entertainment Business Exchange platform requires a performant, type-safe API framework that supports a multi-tenant architecture, plugin composition, and fast cold-start times. The platform spans 8 bounded domains (auth, business, booking, ledger, agent orchestration, marketplace, rights, passport chain-of-title) and must remain extractable into service boundaries in the future.
+The EntEx platform requires a performant, type-safe API framework that supports a multi-tenant architecture, plugin composition, and fast cold-start times. The platform spans 8 bounded domains (auth, business, booking, ledger, agent orchestration, marketplace, rights, passport chain-of-title) and must remain extractable into service boundaries in the future.
 
 ## Decision
 

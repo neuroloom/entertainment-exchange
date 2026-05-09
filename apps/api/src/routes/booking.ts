@@ -5,11 +5,18 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
-import { assertBookingTransition, calculateQuote, BookingStateError, isTerminalState } from '@entertainment-exchange/orchestration';
-import type { BookingState } from '@entertainment-exchange/orchestration';
+import { params } from '../plugins/requestContext.js';
+import { assertBookingTransition, calculateQuote, BookingStateError, isTerminalState } from '@entex/orchestration';
+import type { BookingState, EventType } from '@entex/orchestration';
 import { paginate, paginatedResponse } from '../plugins/paginate.plugin.js';
-import { MemoryStore, AuditStore, JournalStore } from '../services/repo.js';
-import { getBusinessAccountMap } from './business.js';
+import { MemoryStore, JournalStore } from '../services/repo.js';
+import { getBusinessAccountMap } from './ledger.js';
+import { webhookService } from '../services/webhook.service.js';
+import { detectConflicts } from '../services/conflict-detector.service.js';
+import { generateIcalFeed } from '../services/ical.service.js';
+import { notificationService } from '../services/notification.service.js';
+import { realtime } from '../services/realtime.service.js';
+import { slackService } from '../services/slack.service.js';
 
 const CreateBookingSchema = z.object({
   eventType: z.string().min(1),
@@ -48,17 +55,33 @@ const UpdateBookingSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 });
 
-export const bookings = new MemoryStore('bookings');
-const auditEvents = new AuditStore();
+export interface Booking {
+  id: string;
+  tenantId: string;
+  businessId: string | undefined;
+  clientId: string | null;
+  artistId: string | null;
+  venueId: string | null;
+  status: string;
+  eventType: string;
+  eventName: string | null;
+  eventDate: string;
+  startTime: string;
+  endTime: string;
+  quotedAmountCents: number | null;
+  totalAmountCents: number | null;
+  depositAmountCents: number | null;
+  source: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const bookings = new MemoryStore<Booking>('bookings');
+
 export const journals = new JournalStore();
 
-function writeAudit(ctx: any, action: string, resourceType: string, resourceId: string, businessId?: string, metadata?: Record<string, unknown>) {
-  auditEvents.push({
-    id: uuid(), tenantId: ctx.tenantId, businessId, actorType: ctx.actor.type,
-    actorId: ctx.actor.id, action, resourceType, resourceId, metadata: metadata ?? {},
-    createdAt: new Date().toISOString(),
-  });
-}
+import { writeAudit } from '../services/audit-helpers.js';
 
 export async function bookingRoutes(app: FastifyInstance) {
   app.post('/bookings', {
@@ -80,7 +103,7 @@ export async function bookingRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('booking:create')) throw AppError.forbidden('Missing booking:create permission');
 
@@ -95,7 +118,7 @@ export async function bookingRoutes(app: FastifyInstance) {
       body.guestCount !== undefined
     ) {
       quote = calculateQuote({
-        eventType: body.eventType as any,
+        eventType: body.eventType as EventType,
         durationHours: body.durationHours,
         guestCount: body.guestCount,
         addOns: body.addOns ?? [],
@@ -113,13 +136,116 @@ export async function bookingRoutes(app: FastifyInstance) {
       source: body.source ?? null, metadata: body.metadata ?? {},
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
+    // Conflict detection for artist/venue double-booking
+    const conflictResult = detectConflicts(
+      { eventDate: booking.eventDate, startTime: booking.startTime, endTime: booking.endTime },
+      bookings.all(ctx.tenantId),
+      booking.artistId,
+      booking.venueId,
+    );
+
     bookings.set(booking);
     writeAudit(ctx, 'booking.create', 'booking', bookingId, ctx.businessId);
-    reply.status(201).send({ data: { ...booking, quote: quote ?? undefined } });
+
+    void webhookService.emit('booking.created', {
+      tenantId: ctx.tenantId, businessId: ctx.businessId, resourceId: bookingId,
+      payload: { id: bookingId, eventType: body.eventType, eventDate: body.eventDate, status: 'draft', quote: quote ?? null },
+    });
+    reply.status(201).send({
+      data: { ...booking, quote: quote ?? undefined },
+      warnings: conflictResult.hasConflict ? { conflicts: conflictResult.conflicts } : undefined,
+    });
+  });
+
+  // POST /bookings/batch — create multiple bookings with partial success
+  app.post('/bookings/batch', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['bookings'],
+        properties: {
+          bookings: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['eventType', 'eventDate', 'startTime', 'endTime'],
+              properties: {
+                eventType: { type: 'string', minLength: 1 },
+                eventName: { type: 'string' },
+                eventDate: { type: 'string', minLength: 1 },
+                startTime: { type: 'string', minLength: 1 },
+                endTime: { type: 'string', minLength: 1 },
+                clientId: { type: 'string' },
+                artistId: { type: 'string' },
+                venueId: { type: 'string' },
+                quotedAmountCents: { type: 'integer' },
+                durationHours: { type: 'number' },
+                guestCount: { type: 'integer' },
+                addOns: { type: 'array', items: { type: 'string' } },
+                travelMiles: { type: 'number' },
+                source: { type: 'string' },
+                metadata: { type: 'object' },
+              },
+            },
+            minItems: 1,
+            maxItems: 100,
+          },
+        },
+      },
+    },
+  }, async (req, reply) => {
+    const ctx = req.ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    if (!ctx.actor.permissions.includes('booking:create')) throw AppError.forbidden('Missing booking:create permission');
+
+    const body = z.object({ bookings: z.array(z.record(z.unknown())) }).parse(req.body);
+    const results: Array<{ status: 'created' | 'failed'; id?: string; error?: string }> = [];
+
+    for (const item of body.bookings) {
+      try {
+        const parsed = CreateBookingSchema.parse(item);
+        const bookingId = uuid();
+
+        let quote: ReturnType<typeof calculateQuote> | null = null;
+        if (parsed.eventType && parsed.durationHours !== undefined && parsed.guestCount !== undefined) {
+          quote = calculateQuote({
+            eventType: parsed.eventType as EventType, durationHours: parsed.durationHours,
+            guestCount: parsed.guestCount, addOns: parsed.addOns ?? [], travelMiles: parsed.travelMiles ?? 0,
+          });
+        }
+
+        const booking = {
+          id: bookingId, tenantId: ctx.tenantId, businessId: ctx.businessId,
+          clientId: parsed.clientId ?? null, artistId: parsed.artistId ?? null, venueId: parsed.venueId ?? null,
+          status: 'inquiry', eventType: parsed.eventType, eventName: parsed.eventName ?? null,
+          eventDate: parsed.eventDate, startTime: parsed.startTime, endTime: parsed.endTime,
+          quotedAmountCents: parsed.quotedAmountCents ?? quote?.totalCents ?? null,
+          totalAmountCents: null, depositAmountCents: null, source: parsed.source ?? null,
+          metadata: parsed.metadata ?? {}, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        };
+        bookings.set(booking);
+
+        writeAudit(ctx, 'booking.create', 'booking', bookingId, ctx.businessId);
+        void webhookService.emit('booking.created', {
+          tenantId: ctx.tenantId, businessId: ctx.businessId, resourceId: bookingId,
+          payload: { id: bookingId, eventType: parsed.eventType, eventDate: parsed.eventDate, status: 'inquiry', quote: quote ?? null },
+        });
+
+        results.push({ status: 'created', id: bookingId });
+      } catch (err) {
+        results.push({ status: 'failed', error: err instanceof Error ? err.message : 'Unknown error' });
+      }
+    }
+
+    const created = results.filter(r => r.status === 'created').length;
+    reply.status(207).send({
+      data: results,
+      meta: { total: body.bookings.length, created, failed: body.bookings.length - created },
+    });
   });
 
   app.get('/bookings', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
 
     const p = paginate(req.query);
@@ -130,8 +256,8 @@ export async function bookingRoutes(app: FastifyInstance) {
   });
 
   app.get('/bookings/:id', async (req, reply) => {
-    const ctx = (req as any).ctx;
-    const b = bookings.get((req.params as any).id);
+    const ctx = req.ctx;
+    const b = bookings.get(params(req).id);
     if (!b || b.tenantId !== ctx.tenantId) throw AppError.notFound('Booking');
     reply.send({ data: b });
   });
@@ -157,11 +283,11 @@ export async function bookingRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('booking:manage')) throw AppError.forbidden('Missing booking:manage permission');
 
-    const booking = bookings.get((req.params as any).id);
+    const booking = bookings.get(params(req).id);
     if (!booking || booking.tenantId !== ctx.tenantId) throw AppError.notFound('Booking');
 
     if (isTerminalState(booking.status as BookingState)) {
@@ -185,7 +311,7 @@ export async function bookingRoutes(app: FastifyInstance) {
     booking.updatedAt = new Date().toISOString();
     bookings.set(booking);
 
-    const changed = Object.keys(body).filter(k => (body as any)[k] !== undefined);
+    const changed = (Object.keys(body) as Array<keyof typeof body>).filter(k => body[k] !== undefined);
     writeAudit(ctx, 'booking.update', 'booking', booking.id, booking.businessId, { changed });
     reply.send({ data: booking });
   });
@@ -201,11 +327,11 @@ export async function bookingRoutes(app: FastifyInstance) {
       },
     },
   }, async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('booking:confirm')) throw AppError.forbidden('Missing booking:confirm permission');
 
-    const booking = bookings.get((req.params as any).id);
+    const booking = bookings.get(params(req).id);
     if (!booking || booking.tenantId !== ctx.tenantId) throw AppError.notFound('Booking');
 
     const body = PatchBookingStatusSchema.parse(req.body);
@@ -225,15 +351,35 @@ export async function bookingRoutes(app: FastifyInstance) {
     bookings.set(booking);
 
     writeAudit(ctx, 'booking.status', 'booking', booking.id, booking.businessId, { status: body.status, reason: body.reason });
+
+    if (body.status === 'confirmed') {
+      void webhookService.emit('booking.confirmed', {
+        tenantId: ctx.tenantId, businessId: booking.businessId, resourceId: booking.id,
+        payload: { id: booking.id, eventType: booking.eventType, eventDate: booking.eventDate, status: body.status },
+      });
+      if (booking.clientId) {
+        void notificationService.send({
+          tenantId: ctx.tenantId, userId: booking.clientId, type: 'booking_confirmed',
+          channels: ['in_app'], vars: { eventName: booking.eventName ?? booking.eventType, eventDate: booking.eventDate, status: 'confirmed' },
+        });
+      }
+      realtime.publish(ctx.tenantId, 'booking.confirmed', { id: booking.id, status: 'confirmed', eventDate: booking.eventDate });
+      void slackService.notify(ctx.tenantId, 'booking.confirmed', {
+        id: booking.id, eventName: booking.eventName ?? booking.eventType,
+        eventDate: booking.eventDate, status: 'confirmed',
+        quotedAmountCents: booking.quotedAmountCents ?? 0,
+      });
+    }
+
     reply.send({ data: booking });
   });
 
   app.post('/bookings/:id/cancel', async (req, reply) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     if (!ctx.actor.permissions.includes('booking:confirm')) throw AppError.forbidden('Missing booking:confirm permission');
 
-    const booking = bookings.get((req.params as any).id);
+    const booking = bookings.get(params(req).id);
     if (!booking || booking.tenantId !== ctx.tenantId) throw AppError.notFound('Booking');
 
     if (isTerminalState(booking.status as BookingState)) {
@@ -244,7 +390,7 @@ export async function bookingRoutes(app: FastifyInstance) {
 
     // Create a reversal journal entry if the booking had been confirmed
     if (previousStatus === 'confirmed' || previousStatus === 'contracted') {
-      const acctMap = getBusinessAccountMap(booking.businessId);
+      const acctMap = getBusinessAccountMap(booking.businessId ?? '');
       const deferredRevId = acctMap.get('2000');
       const bookingRevId = acctMap.get('4000');
 
@@ -254,7 +400,7 @@ export async function bookingRoutes(app: FastifyInstance) {
           {
             id: journalId,
             tenantId: ctx.tenantId,
-            businessId: booking.businessId,
+            businessId: booking.businessId ?? '',
             memo: `Cancel booking ${booking.id} — reversal`,
             referenceType: 'booking',
             referenceId: booking.id,
@@ -274,6 +420,44 @@ export async function bookingRoutes(app: FastifyInstance) {
     bookings.set(booking);
 
     writeAudit(ctx, 'booking.cancel', 'booking', booking.id, booking.businessId, { previousStatus });
+
+    void webhookService.emit('booking.cancelled', {
+      tenantId: ctx.tenantId, businessId: booking.businessId, resourceId: booking.id,
+      payload: { id: booking.id, eventType: booking.eventType, eventDate: booking.eventDate, previousStatus },
+    });
+    if (booking.clientId) {
+      void notificationService.send({
+        tenantId: ctx.tenantId, userId: booking.clientId, type: 'booking_cancelled',
+        channels: ['in_app'], vars: { eventName: booking.eventName ?? booking.eventType, eventDate: booking.eventDate },
+      });
+    }
+    realtime.publish(ctx.tenantId, 'booking.cancelled', { id: booking.id, eventDate: booking.eventDate });
+    void slackService.notify(ctx.tenantId, 'booking.cancelled', {
+      id: booking.id, eventName: booking.eventName ?? booking.eventType,
+      eventDate: booking.eventDate,
+    });
+
     reply.send({ data: booking });
+  });
+
+  // GET /bookings/calendar.ics — iCal feed for calendar subscription
+  app.get('/bookings/calendar.ics', async (req, reply) => {
+    const ctx = req.ctx;
+    const query = req.query as Record<string, string>;
+    let items = bookings.all(ctx.tenantId);
+
+    // Filter by artist or venue
+    if (query.artistId) items = items.filter(b => b.artistId === query.artistId);
+    if (query.venueId) items = items.filter(b => b.venueId === query.venueId);
+    if (query.businessId) items = items.filter(b => b.businessId === query.businessId);
+
+    // Exclude cancelled
+    items = items.filter(b => b.status !== 'cancelled');
+
+    const cal = generateIcalFeed(items);
+    reply
+      .header('Content-Type', 'text/calendar; charset=utf-8')
+      .header('Content-Disposition', 'inline; filename="bookings.ics"')
+      .send(cal);
   });
 }

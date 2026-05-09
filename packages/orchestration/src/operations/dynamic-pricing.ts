@@ -319,9 +319,8 @@ export class DynamicPricingEngine {
       const date = new Date(day * 1000 * 60 * 60 * 24);
       const dateStr = date.toISOString().slice(0, 10);
       const dow = date.getDay();
-      const monthKey = getDowToMonthKey(date); // need month from date
 
-      // Get actual month key from the date string
+      // Get month key from the date string
       const actualMonthKey = getMonthKey(dateStr);
       const seasonFactor = (SEASONALITY_WEIGHTS[actualMonthKey] ?? 1.0);
       const dayFactor = dowFactors[dow];
@@ -389,10 +388,4 @@ export class DynamicPricingEngine {
     }
     return result;
   }
-}
-
-// Helper to get month key from a Date object (used in forecast loop)
-function getDowToMonthKey(date: Date): string {
-  const m = date.getMonth() + 1;
-  return String(m).padStart(2, '0');
 }

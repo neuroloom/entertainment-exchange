@@ -187,7 +187,7 @@ export class FraudDetector {
     const all = new Map<string, FraudDetectorIndicator>();
     for (const indicators of this.scanHistory.values()) {
       for (const ind of indicators) {
-        if (ind.entities.includes(businessId) || (ind.evidence as any).tenantId === businessId || (ind.evidence as any).businessId === businessId)
+        if (ind.entities.includes(businessId) || ind.evidence.tenantId === businessId || ind.evidence.businessId === businessId)
           all.set(ind.indicatorId, ind);
       }
     }

@@ -66,7 +66,7 @@ export async function hydrateAllStores(): Promise<void> {
   const results = await Promise.allSettled(_stores.map(s => s.hydrate()));
   for (const r of results) {
     if (r.status === 'rejected') {
-      console.warn('[repo] hydration error (non-fatal):', (r.reason as Error).message);
+      console.warn('[repo] hydration error (non-fatal):', r.reason instanceof Error ? r.reason.message : String(r.reason));
     }
   }
 }
@@ -85,7 +85,7 @@ export async function pingPg(): Promise<boolean> {
 export async function migrateForward(): Promise<string[]> {
   try {
     // Dynamic import — tsx resolves .js → .ts in dev, tsc emits .js in prod
-    const mod = await import('../../../../packages/db/src/migrate.js');
+    const mod = await import('@entex/db');
     if (typeof mod.migrate === 'function') return await mod.migrate();
   } catch { /* migration module unavailable or no DATABASE_URL */ }
   return [];
@@ -93,7 +93,46 @@ export async function migrateForward(): Promise<string[]> {
 
 // ── In-Memory Store with PG persistence + hydration ─────────────────────────
 
-export class MemoryStore<T = any> {
+export interface StoreEntity {
+  id: string;
+  tenantId?: string;
+}
+
+export interface AuditEvent {
+  id: string;
+  tenantId: string;
+  businessId?: string;
+  actorType: string;
+  actorId: string;
+  action: string;
+  resourceType: string;
+  resourceId: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface JournalRecord {
+  id: string;
+  tenantId: string;
+  businessId: string;
+  memo: string | null;
+  referenceType: string | null;
+  referenceId: string | null;
+  occurredAt: string;
+  createdAt: string;
+}
+
+export interface JournalEntryRecord {
+  id: string;
+  tenantId: string;
+  journalId: string;
+  accountId: string;
+  direction: string;
+  amountCents: number;
+  createdAt?: string;
+}
+
+export class MemoryStore<T extends StoreEntity = any> {
   private data = new Map<string, T>();
 
   constructor(private tableName?: string) {
@@ -108,7 +147,7 @@ export class MemoryStore<T = any> {
     const { rows } = await pool.query(`SELECT * FROM ${this.tableName}`);
     for (const row of rows) {
       const mapped = mapKeys(row as Record<string, unknown>, snakeToCamel) as unknown as T;
-      const id = (mapped as any).id;
+      const id = mapped.id;
       if (id) this.data.set(id, mapped);
     }
   }
@@ -121,7 +160,7 @@ export class MemoryStore<T = any> {
       if (this.tableName) void this.persist(value);
     } else {
       const item = itemOrKey as T;
-      this.data.set((item as any).id, item);
+      this.data.set(item.id, item);
       if (this.tableName) void this.persist(item);
     }
   }
@@ -131,7 +170,7 @@ export class MemoryStore<T = any> {
   delete(id: string): boolean { return this.data.delete(id); }
 
   all(tenantId: string): T[] {
-    return [...this.data.values()].filter(item => (item as any).tenantId === tenantId);
+    return [...this.data.values()].filter(item => item.tenantId === tenantId);
   }
 
   find(predicate: (item: T) => boolean): T | undefined {
@@ -143,6 +182,9 @@ export class MemoryStore<T = any> {
 
   values(): IterableIterator<T> { return this.data.values(); }
   size(): number { return this.data.size; }
+
+  /** Expose the backing Map for compat with consumers that expect Map<K, V> */
+  toMap(): Map<string, T> { return this.data; }
 
   // ── Persistence ────────────────────────────────────────────────────────
 
@@ -168,7 +210,7 @@ export class MemoryStore<T = any> {
 // ── Audit Store ─────────────────────────────────────────────────────────────
 
 export class AuditStore {
-  private events: any[] = [];
+  private events: AuditEvent[] = [];
 
   constructor() { registerStore(this); }
 
@@ -178,26 +220,25 @@ export class AuditStore {
     const { rows } = await pool.query('SELECT * FROM audit_events ORDER BY created_at');
     for (const row of rows) {
       const mapped = mapKeys(row as Record<string, unknown>, snakeToCamel);
-      // Rename tenant_id→tenantId etc already handled by snakeToCamel
-      this.events.push(mapped);
+      this.events.push(mapped as unknown as AuditEvent);
     }
   }
 
-  push(event: any): void {
+  push(event: AuditEvent): void {
     this.events.push(event);
     void this.persist(event);
   }
 
-  all(tenantId?: string): any[] {
-    return tenantId ? this.events.filter((e: any) => e.tenantId === tenantId) : this.events;
+  all(tenantId?: string): AuditEvent[] {
+    return tenantId ? this.events.filter(e => e.tenantId === tenantId) : this.events;
   }
 
-  filter(predicate: (event: any) => boolean): any[] { return this.events.filter(predicate); }
-  find(predicate: (event: any) => boolean): any | undefined { return this.events.find(predicate); }
-  some(predicate: (event: any) => boolean): boolean { return this.events.some(predicate); }
+  filter(predicate: (event: AuditEvent) => boolean): AuditEvent[] { return this.events.filter(predicate); }
+  find(predicate: (event: AuditEvent) => boolean): AuditEvent | undefined { return this.events.find(predicate); }
+  some(predicate: (event: AuditEvent) => boolean): boolean { return this.events.some(predicate); }
   count(tenantId?: string): number { return this.all(tenantId).length; }
 
-  private async persist(event: any): Promise<void> {
+  private async persist(event: AuditEvent): Promise<void> {
     const pool = await getPool();
     if (!pool) return;
     try {
@@ -216,8 +257,8 @@ export class AuditStore {
 // ── Journal Store ───────────────────────────────────────────────────────────
 
 export class JournalStore {
-  journals: any[] = [];
-  entries: any[] = [];
+  journals: JournalRecord[] = [];
+  entries: JournalEntryRecord[] = [];
 
   constructor() { registerStore(this); }
 
@@ -227,30 +268,29 @@ export class JournalStore {
     const jRes = await pool.query('SELECT * FROM ledger_journals ORDER BY created_at');
     for (const row of jRes.rows) {
       const mapped = mapKeys(row as Record<string, unknown>, snakeToCamel);
-      // PG columns use ledgers_journals schema; map referenceType/referenceId etc
-      this.journals.push(mapped);
+      this.journals.push(mapped as unknown as JournalRecord);
     }
     const eRes = await pool.query('SELECT * FROM ledger_entries ORDER BY journal_id');
     for (const row of eRes.rows) {
       const mapped = mapKeys(row as Record<string, unknown>, snakeToCamel);
-      this.entries.push(mapped);
+      this.entries.push(mapped as unknown as JournalEntryRecord);
     }
   }
 
-  addJournal(j: any, e: any[]): void {
+  addJournal(j: JournalRecord, e: JournalEntryRecord[]): void {
     this.journals.push(j);
     this.entries.push(...e);
     void this.persistJournal(j, e);
   }
 
-  getJournal(id: string): any | undefined { return this.journals.find(j => j.id === id); }
-  getEntries(journalId: string): any[] { return this.entries.filter(e => e.journalId === journalId); }
+  getJournal(id: string): JournalRecord | undefined { return this.journals.find(j => j.id === id); }
+  getEntries(journalId: string): JournalEntryRecord[] { return this.entries.filter(e => e.journalId === journalId); }
 
-  listJournals(tenantId: string, businessId?: string): any[] {
+  listJournals(tenantId: string, businessId?: string): JournalRecord[] {
     return this.journals.filter(j => j.tenantId === tenantId && (!businessId || j.businessId === businessId));
   }
 
-  private async persistJournal(j: any, e: any[]): Promise<void> {
+  private async persistJournal(j: JournalRecord, e: JournalEntryRecord[]): Promise<void> {
     const pool = await getPool();
     if (!pool) return;
     try {

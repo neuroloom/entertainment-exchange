@@ -141,7 +141,6 @@ const MONTHLY_SEASONALITY: ReadonlyMap<number, number> = new Map([
 // ─── Rising-star detection constants ────────────────────────────────────────
 
 const MIN_MONTHS_DATA = 3;                    // Minimum months for trend calculation
-const RISING_STAR_MIN_MONTHLY = 2;            // At least 2 bookings/month to qualify
 const RISING_STAR_MIN_GROWTH = 0.05;          // At least 5% monthly growth
 const EMERGING_TO_RISING_BOOKING_COUNT = 8;   // Bookings needed to move from emerging to rising
 const RISING_TO_ESTABLISHED_BOOKING_COUNT = 25;
@@ -151,10 +150,6 @@ const TREND_DECAY_WINDOW = 3;                 // Months to look back for trend
 // ─── TalentEngine ───────────────────────────────────────────────────────────
 
 export class TalentEngine {
-  private _artistCache: Map<string, ArtistProfile> | null = null;
-  private _venueCache: Map<string, VenueProfile> | null = null;
-  private _allBookings: BookingRecord[] | null = null;
-
   constructor(private readonly _store: TalentStore) {}
 
   // ─── Artist → Venue matching ──────────────────────────────────────────────

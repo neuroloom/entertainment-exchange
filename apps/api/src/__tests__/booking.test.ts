@@ -525,11 +525,11 @@ describe('POST /api/v1/bookings/:id/cancel — reversal journal', () => {
       j.referenceId === bookingId && j.memo.includes('reversal'),
     );
     expect(reversal).toBeDefined();
-    expect(reversal.memo).toContain('Cancel booking');
-    expect(reversal.memo).toContain('reversal');
+    expect(reversal!.memo).toContain('Cancel booking');
+    expect(reversal!.memo).toContain('reversal');
 
     // Verify journal entries: debit to deferred revenue (2000), credit to booking revenue (4000)
-    const entries = journals.getEntries(reversal.id);
+    const entries = journals.getEntries(reversal!.id);
     expect(entries).toHaveLength(2);
     expect(entries[0].direction).toBe('debit');
     expect(entries[0].amountCents).toBe(150000);
@@ -584,7 +584,7 @@ describe('POST /api/v1/bookings/:id/cancel — reversal journal', () => {
     );
     expect(reversal).toBeDefined();
 
-    const entries = journals.getEntries(reversal.id);
+    const entries = journals.getEntries(reversal!.id);
     expect(entries).toHaveLength(2);
     expect(entries[0].amountCents).toBe(200000);
     expect(entries[1].amountCents).toBe(200000);

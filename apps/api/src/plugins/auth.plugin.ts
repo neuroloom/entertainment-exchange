@@ -72,8 +72,8 @@ export async function verifyToken(token: string): Promise<TokenResult> {
         iat: payload.iat, exp: payload.exp,
       },
     };
-  } catch (err: any) {
-    if (err?.code === 'ERR_JWT_EXPIRED') return { payload: null, error: 'expired' };
+  } catch (err) {
+    if (err instanceof Error && 'code' in err && err.code === 'ERR_JWT_EXPIRED') return { payload: null, error: 'expired' };
     return { payload: null, error: 'malformed' };
   }
 }
@@ -103,7 +103,7 @@ export interface PermissionSet {
 
 export function withAuth(...required: string[]): preHandlerHookHandler {
   return async (req: FastifyRequest) => {
-    const ctx = (req as any).ctx;
+    const ctx = req.ctx;
     // Accept both JWT-derived auth AND header-based auth (x-actor-id)
     const isAuthenticated = ctx?.actor?.userId && ctx.actor.userId !== 'anonymous';
     if (!isAuthenticated) throw AppError.unauthenticated('Authentication required');
@@ -122,16 +122,11 @@ export async function authPlugin(app: FastifyInstance) {
     if (!authHeader) return;
     const parts = authHeader.split(' ');
     if (parts.length !== 2 || parts[0].toLowerCase() !== 'bearer') return;
-    const { payload, error } = await verifyToken(parts[1]);
-    if (!payload) {
-      if (error === 'expired') {
-        (req as any)._tokenExpired = true;
-      }
-      return;
-    }
-    const reqCtx = (req as any).ctx;
+    const { payload } = await verifyToken(parts[1]);
+    if (!payload) return;
+    const reqCtx = req.ctx;
     if (reqCtx) {
-      (req as any).ctx = {
+      req.ctx = {
         ...reqCtx,
         tenantId: payload.tenant,
         actor: {

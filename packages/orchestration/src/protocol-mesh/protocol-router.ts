@@ -177,9 +177,6 @@ const stubFeeBreakdown = (
   return { flatCents, percentageCents, totalCents: flatCents + percentageCents };
 };
 
-const resolveAfter = (ms: number): Promise<void> =>
-  new Promise((r) => setTimeout(r, ms));
-
 function createStripeAdapter(): ProtocolAdapter {
   return {
     protocolId: 'stripe',

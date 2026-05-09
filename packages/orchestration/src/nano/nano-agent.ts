@@ -14,7 +14,7 @@ import { performance } from 'node:perf_hooks';
 import type { OutputMaximizer } from '../output-maximizer.js';
 import type { InferenceRequest } from '../types.js';
 import { NanoMutationEngine, mutateParams } from './mutation.js';
-import { evaluateParams, scoreVGDO, fitnessGrade, computeVGDO } from './fitness.js';
+import { evaluateParams, scoreVGDO } from './fitness.js';
 import { dnaFromConfig, dnaToVector } from './dna.js';
 import { saveCheckpoint, loadLatestCheckpoint, listSessions } from './checkpoint.js';
 import type {
@@ -57,14 +57,6 @@ export class NanoAgent {
   private haltedEarly = false;
   private haltEpoch: number | null = null;
   private startTime = 0;
-
-  // PID controller state
-  private pidIntegral = 0;
-  private pidPrevError = 0;
-  private readonly pidKp = 1.0;
-  private readonly pidKi = 0.1;
-  private readonly pidKd = 0.05;
-  private readonly pidTarget = 0.85;
 
   constructor(
     private maximizer: OutputMaximizer,
@@ -127,13 +119,6 @@ export class NanoAgent {
         omega = dna.safetyMetrics.omega;
         vgdoResult = scoreVGDO(omega, candidateFitness, 0.85, 0.9);
         grade = vgdoResult.grade;
-
-        // PID-governed correction
-        const error = this.pidTarget - vgdoResult.vgdo;
-        this.pidIntegral = Math.max(-5, Math.min(5, this.pidIntegral + error));
-        const derivative = error - this.pidPrevError;
-        const _pidOutput = this.pidKp * error + this.pidKi * this.pidIntegral + this.pidKd * derivative;
-        this.pidPrevError = error;
       } else {
         vgdoResult = scoreVGDO(omega, candidateFitness, 0.85, 0.9);
         grade = vgdoResult.grade;
