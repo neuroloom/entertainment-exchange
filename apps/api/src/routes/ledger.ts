@@ -89,6 +89,141 @@ export async function ledgerRoutes(app: FastifyInstance) {
     reply.send({ data: account });
   });
 
+  // ─── Account CRUD ────────────────────────────────────────────────────────────
+
+  app.post('/accounts', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['businessId', 'code', 'name', 'accountType'],
+        properties: {
+          businessId: { type: 'string', format: 'uuid' },
+          code: { type: 'string', minLength: 1 },
+          name: { type: 'string', minLength: 1 },
+          accountType: { type: 'string', minLength: 1 },
+          currency: { type: 'string' },
+        },
+      },
+    },
+  }, async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    if (!ctx.actor.permissions.includes('payment:create')) throw AppError.forbidden('Missing payment:create permission');
+
+    const body = z.object({
+      businessId: z.string().uuid(),
+      code: z.string().min(1),
+      name: z.string().min(1),
+      accountType: z.string().min(1),
+      currency: z.string().default('USD'),
+    }).parse(req.body);
+
+    seedDefaultAccounts(body.businessId, ctx.tenantId);
+    const accts = accounts.get(body.businessId) ?? [];
+
+    // Prevent duplicate codes
+    if (accts.some((a: any) => a.code === body.code && a.status !== 'archived')) {
+      throw AppError.invalid(`Account code "${body.code}" already exists for this business`);
+    }
+
+    const accountId = uuid();
+    const account = {
+      id: accountId, tenantId: ctx.tenantId, businessId: body.businessId,
+      code: body.code, name: body.name, accountType: body.accountType,
+      currency: body.currency, status: 'active', isDefault: false,
+    };
+    accts.push(account);
+
+    writeAudit(ctx, 'account.create', 'ledger_account', accountId, body.businessId, {
+      code: body.code, accountType: body.accountType,
+    });
+    reply.status(201).send({ data: account });
+  });
+
+  app.patch('/accounts/:id', {
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          code: { type: 'string', minLength: 1 },
+          name: { type: 'string', minLength: 1 },
+          accountType: { type: 'string', minLength: 1 },
+        },
+        additionalProperties: false,
+      },
+    },
+  }, async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    if (!ctx.actor.permissions.includes('payment:create')) throw AppError.forbidden('Missing payment:create permission');
+
+    const body = z.object({
+      code: z.string().min(1).optional(),
+      name: z.string().min(1).optional(),
+      accountType: z.string().min(1).optional(),
+    }).parse(req.body);
+
+    // Find the account across all business account groups
+    const accountId = (req.params as any).id;
+    let foundAcct: any = null;
+    let foundBizId: string | null = null;
+    for (const [bizId, accts] of accounts.entries()) {
+      const a = accts.find((aa: any) => aa.id === accountId && aa.tenantId === ctx.tenantId);
+      if (a) { foundAcct = a; foundBizId = bizId; break; }
+    }
+    if (!foundAcct) throw AppError.notFound('Account');
+
+    // Only allow updates to custom accounts (not default ones)
+    if (foundAcct.isDefault) {
+      throw AppError.invalid('Default accounts cannot be modified');
+    }
+
+    if (body.code !== undefined) {
+      // Prevent duplicate codes
+      const accts = accounts.get(foundBizId!) ?? [];
+      if (accts.some((a: any) => a.id !== accountId && a.code === body.code && a.status !== 'archived')) {
+        throw AppError.invalid(`Account code "${body.code}" already exists for this business`);
+      }
+      foundAcct.code = body.code;
+    }
+    if (body.name !== undefined) foundAcct.name = body.name;
+    if (body.accountType !== undefined) foundAcct.accountType = body.accountType;
+
+    writeAudit(ctx, 'account.update', 'ledger_account', accountId, foundAcct.businessId, {
+      changes: Object.keys(body),
+    });
+    reply.send({ data: foundAcct });
+  });
+
+  app.delete('/accounts/:id', async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    if (!ctx.actor.permissions.includes('payment:create')) throw AppError.forbidden('Missing payment:create permission');
+
+    const accountId = (req.params as any).id;
+    let foundAcct: any = null;
+    for (const accts of accounts.values()) {
+      const a = accts.find((aa: any) => aa.id === accountId && aa.tenantId === ctx.tenantId);
+      if (a) { foundAcct = a; break; }
+    }
+    if (!foundAcct) throw AppError.notFound('Account');
+
+    // Only allow soft-delete of custom accounts (not default ones)
+    if (foundAcct.isDefault) {
+      throw AppError.invalid('Default accounts cannot be deleted');
+    }
+    if (foundAcct.status === 'archived') {
+      throw AppError.invalid('Account is already archived');
+    }
+
+    foundAcct.status = 'archived';
+
+    writeAudit(ctx, 'account.archive', 'ledger_account', accountId, foundAcct.businessId);
+    reply.send({ data: foundAcct });
+  });
+
+  // ─── Journal Posting ─────────────────────────────────────────────────────────
+
   app.post('/journal', {
     schema: {
       body: {
