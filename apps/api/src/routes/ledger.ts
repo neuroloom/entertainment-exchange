@@ -25,7 +25,7 @@ const PostJournalSchema = z.object({
 });
 
 const accounts = new Map<string, any[]>();
-const journalStore = new JournalStore();
+export const journalStore = new JournalStore();
 const revenueEvents: any[] = [];
 const auditEvents = new AuditStore();
 
