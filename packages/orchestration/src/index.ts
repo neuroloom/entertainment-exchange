@@ -227,6 +227,18 @@ export type {
   ProtocolStatus,
 } from './protocol-mesh/index.js';
 
+// Talent Matching — Moat 8: Predictive Talent Marketplace
+export { TalentEngine } from './talent-matching/index.js';
+export type {
+  TalentMatch,
+  DemandForecast as TalentDemandForecast,
+  CareerTrajectory as TalentCareerTrajectory,
+  ArtistProfile as TalentArtistProfile,
+  VenueProfile as TalentVenueProfile,
+  BookingRecord as TalentBookingRecord,
+  TalentStore,
+} from './talent-matching/index.js';
+
 // Cryptographic Audit — Moat 9: Immutable Cryptographic Audit Chain
 export { ChainVerifier } from './cryptographic-audit/index.js';
 export type {
