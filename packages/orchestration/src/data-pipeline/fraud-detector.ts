@@ -2,39 +2,30 @@
 // Moat 3: Data network effects — detection thresholds tighten as more data flows
 // Scans booking values, document hashes, listing velocity, and metadata clones
 
-// ─── Fraud Indicator ──────────────────────────────────────────────────────────
-
 export interface FraudIndicator {
   indicatorId: string;
   type: 'duplicate_document' | 'rapid_listing' | 'value_anomaly' | 'metadata_clone';
-  confidence: number;       // 0-1
-  entities: string[];       // affected entity IDs
+  confidence: number;
+  entities: string[];
   evidence: Record<string, unknown>;
   detectedAt: number;
 }
 
-// ─── Stores Interface (injected for testability) ──────────────────────────────
-
 export interface FraudDetectorStores {
-  /** Generic in-memory store with id-keyed entries. Must support values() iterator. */
   bookings: { values(): IterableIterator<Record<string, unknown>> };
   listings: { values(): IterableIterator<Record<string, unknown>> };
   rightsAssets: { values(): IterableIterator<Record<string, unknown>> };
   auditEvents: { all(tenantId?: string): Array<Record<string, unknown>> };
 }
 
-// ─── Internal Statistics ──────────────────────────────────────────────────────
-
 interface TenantStats {
   tenantId: string;
   bookingValues: number[];
   listingCreateTimes: number[];
   listingDeleteTimes: number[];
-  documentHashes: Map<string, string[]>;   // hash -> entity IDs
-  rightAssetMetadata: Map<string, string[]>; // metadata fingerprint -> asset IDs
+  documentHashes: Map<string, string[]>;
+  rightAssetMetadata: Map<string, string[]>;
 }
-
-// ─── Risk History ─────────────────────────────────────────────────────────────
 
 interface RiskHistoryEntry {
   businessId: string;
@@ -43,44 +34,104 @@ interface RiskHistoryEntry {
   calculatedAt: number;
 }
 
-// ─── Z-Score computation ──────────────────────────────────────────────────────
+// ─── Stat helpers ──────────────────────────────────────────────────────────────
 
-function mean(values: number[]): number {
-  if (values.length === 0) return 0;
-  return values.reduce((s, v) => s + v, 0) / values.length;
+function mean(v: number[]): number { return v.length ? v.reduce((s, x) => s + x, 0) / v.length : 0; }
+function stdDev(v: number[], avg: number): number {
+  if (v.length < 2) return 0;
+  return Math.sqrt(v.reduce((s, x) => s + (x - avg) ** 2, 0) / (v.length - 1));
 }
-
-function stdDev(values: number[], avg: number): number {
-  if (values.length < 2) return 0;
-  const variance = values.reduce((s, v) => s + (v - avg) ** 2, 0) / (values.length - 1);
-  return Math.sqrt(variance);
-}
-
-function zScore(value: number, avg: number, sd: number): number {
-  if (sd === 0) return 0;
-  return Math.abs((value - avg) / sd);
-}
-
-// ─── Simple hash for metadata fingerprinting ───────────────────────────────────
+function zScore(value: number, avg: number, sd: number): number { return sd === 0 ? 0 : Math.abs((value - avg) / sd); }
 
 function fingerprintMetadata(metadata: unknown): string {
   const normalized = JSON.stringify(metadata, Object.keys(metadata as object ?? {}).sort());
   let h = 2166136261;
-  for (let i = 0; i < normalized.length; i++) {
-    h ^= normalized.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
+  for (let i = 0; i < normalized.length; i++) { h ^= normalized.charCodeAt(i); h = Math.imul(h, 16777619); }
   return (h >>> 0).toString(16);
 }
-
-// ─── UUID v4 generation (no dependency) ────────────────────────────────────────
 
 function generateId(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
     const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
+    return c === 'x' ? r.toString(16) : ((r & 0x3) | 0x8).toString(16);
   });
+}
+
+// ─── Cross-tenant helper types ─────────────────────────────────────────────────
+
+interface CrossTenantEntry { hash: string; fingerprint: string; tenantId: string;
+  entityId?: string; assetId?: string; }
+
+function buildGlobalDocHashes(
+  tenantIds: Set<string>, buildTenantStats: (tid: string) => TenantStats,
+): Map<string, CrossTenantEntry[]> {
+  const global = new Map<string, CrossTenantEntry[]>();
+  for (const tid of tenantIds) {
+    const stats = buildTenantStats(tid);
+    for (const [hash, entityIds] of stats.documentHashes) {
+      const existing = global.get(hash) ?? [];
+      for (const eid of entityIds) existing.push({ hash, fingerprint: '', tenantId: tid, entityId: eid });
+      global.set(hash, existing);
+    }
+  }
+  return global;
+}
+
+function buildGlobalMetaFingerprints(
+  tenantIds: Set<string>, buildTenantStats: (tid: string) => TenantStats,
+): Map<string, CrossTenantEntry[]> {
+  const global = new Map<string, CrossTenantEntry[]>();
+  for (const tid of tenantIds) {
+    const stats = buildTenantStats(tid);
+    for (const [fp, assetIds] of stats.rightAssetMetadata) {
+      const existing = global.get(fp) ?? [];
+      for (const aid of assetIds) existing.push({ hash: '', fingerprint: fp, tenantId: tid, assetId: aid });
+      global.set(fp, existing);
+    }
+  }
+  return global;
+}
+
+function crossTenantFlags(
+  global: Map<string, CrossTenantEntry[]>, keyField: string, indicatorType: FraudIndicator['type'],
+  baseConfidence: number, perTenant: number, entityExtractor: (e: CrossTenantEntry) => string,
+): FraudIndicator[] {
+  const out: FraudIndicator[] = [];
+  for (const [key, entries] of global) {
+    const tenantSet = new Set(entries.map(e => e.tenantId));
+    if (tenantSet.size > 1) {
+      out.push({
+        indicatorId: generateId(), type: indicatorType,
+        confidence: Math.min(1.0, baseConfidence + (tenantSet.size - 2) * perTenant),
+        entities: entries.map(entityExtractor),
+        evidence: { [keyField]: key, tenantCount: tenantSet.size, tenants: [...tenantSet],
+          entryCount: entries.length },
+        detectedAt: Date.now(),
+      });
+    }
+  }
+  return out;
+}
+
+// ─── Cluster detector: flags any map where multiple IDs share the same key ─────
+
+function detectClusters<K>(
+  map: Map<K, string[]>, type: FraudIndicator['type'],
+  baseConfidence: number, perExtra: number, extraEvidence: Record<string, unknown>,
+): FraudIndicator[] {
+  const out: FraudIndicator[] = [];
+  for (const [key, ids] of map) {
+    if (ids.length > 1) {
+      out.push({
+        indicatorId: generateId(), type,
+        confidence: Math.min(1.0, baseConfidence + (ids.length - 2) * perExtra),
+        entities: ids,
+        evidence: { key: String(key), duplicateCount: ids.length, ...extraEvidence },
+        detectedAt: Date.now(),
+      });
+    }
+  }
+  return out;
 }
 
 // ─── Main Class ────────────────────────────────────────────────────────────────
@@ -89,489 +140,186 @@ export class FraudDetector {
   private scanHistory = new Map<string, FraudIndicator[]>();
   private riskHistory = new Map<string, RiskHistoryEntry[]>();
   private zScoreThreshold = 3.0;
-  private rapidWindowMs = 60_000; // 1 minute for rapid-fire detection
+  private rapidWindowMs = 60_000;
   private rapidCountThreshold = 5;
-
-  // Learning: thresholds tighten as more data flows through the system
   private totalScans = 0;
   private totalIndicators = 0;
 
-  constructor(
-    private stores: FraudDetectorStores,
-  ) {}
-
-  // ─── Scan Single Tenant ─────────────────────────────────────────────────────
+  constructor(private stores: FraudDetectorStores) {}
 
   scanTenant(tenantId: string): FraudIndicator[] {
     this.totalScans++;
-    const indicators: FraudIndicator[] = [];
-
     const stats = this.buildTenantStats(tenantId);
-
-    // 1. Duplicate document hashes within tenant
-    indicators.push(...this.detectDuplicateDocuments(stats, tenantId));
-
-    // 2. Rapid-fire listing creation/deletion
-    indicators.push(...this.detectRapidListings(stats, tenantId));
-
-    // 3. Value anomalies (z-score > threshold)
-    indicators.push(...this.detectValueAnomalies(stats, tenantId));
-
-    // 4. Metadata clones
-    indicators.push(...this.detectMetadataClones(stats, tenantId));
-
-    // Record scan results
+    const indicators: FraudIndicator[] = [
+      ...detectClusters(stats.documentHashes, 'duplicate_document', 0.5, 0.2, { tenantId }),
+      ...this.detectRapidListings(stats, tenantId),
+      ...this.detectValueAnomalies(stats, tenantId),
+      ...detectClusters(stats.rightAssetMetadata, 'metadata_clone', 0.5, 0.25, { tenantId }),
+    ];
     this.scanHistory.set(tenantId, indicators);
     this.totalIndicators += indicators.length;
-
-    // Tighten thresholds with more data (learning effect)
     this.adaptThresholds();
-
     return indicators;
   }
-
-  // ─── Cross-Tenant Scan (Network Effect) ─────────────────────────────────────
 
   scanCrossTenant(): FraudIndicator[] {
     this.totalScans++;
-    const indicators: FraudIndicator[] = [];
-
-    // Collect all tenants from available store data
     const tenantIds = new Set<string>();
-    for (const booking of this.stores.bookings.values()) {
-      const tid = booking.tenantId as string;
-      if (tid) tenantIds.add(tid);
-    }
-    for (const listing of this.stores.listings.values()) {
-      const tid = listing.tenantId as string;
-      if (tid) tenantIds.add(tid);
-    }
-    for (const asset of this.stores.rightsAssets.values()) {
-      const tid = asset.tenantId as string;
-      if (tid) tenantIds.add(tid);
-    }
+    for (const it of [this.stores.bookings, this.stores.listings, this.stores.rightsAssets])
+      for (const e of it.values()) { const tid = e.tenantId as string; if (tid) tenantIds.add(tid); }
 
-    // Cross-tenant duplicate document detection
-    const globalDocHashes = new Map<string, Array<{ hash: string; tenantId: string; entityId: string }>>();
-
-    for (const tenantId of tenantIds) {
-      const stats = this.buildTenantStats(tenantId);
-      for (const [hash, entityIds] of stats.documentHashes) {
-        const existing = globalDocHashes.get(hash) ?? [];
-        for (const eid of entityIds) {
-          existing.push({ hash, tenantId, entityId: eid });
-        }
-        globalDocHashes.set(hash, existing);
-      }
-    }
-
-    // Flag hashes appearing in multiple tenants
-    for (const [hash, entries] of globalDocHashes) {
-      const tenantSet = new Set(entries.map(e => e.tenantId));
-      if (tenantSet.size > 1) {
-        indicators.push({
-          indicatorId: generateId(),
-          type: 'duplicate_document',
-          confidence: Math.min(1.0, 0.7 + (tenantSet.size - 2) * 0.1),
-          entities: entries.map(e => e.entityId),
-          evidence: {
-            hash,
-            tenantCount: tenantSet.size,
-            tenants: [...tenantSet],
-            details: entries,
-          },
-          detectedAt: Date.now(),
-        });
-      }
-    }
-
-    // Cross-tenant metadata clones
-    const globalMetaFingerprints = new Map<string, Array<{ fingerprint: string; tenantId: string; assetId: string }>>();
-
-    for (const tenantId of tenantIds) {
-      const stats = this.buildTenantStats(tenantId);
-      for (const [fp, assetIds] of stats.rightAssetMetadata) {
-        const existing = globalMetaFingerprints.get(fp) ?? [];
-        for (const aid of assetIds) {
-          existing.push({ fingerprint: fp, tenantId, assetId: aid });
-        }
-        globalMetaFingerprints.set(fp, existing);
-      }
-    }
-
-    for (const [fp, entries] of globalMetaFingerprints) {
-      const tenantSet = new Set(entries.map(e => e.tenantId));
-      if (tenantSet.size > 1) {
-        indicators.push({
-          indicatorId: generateId(),
-          type: 'metadata_clone',
-          confidence: Math.min(1.0, 0.6 + (tenantSet.size - 2) * 0.15),
-          entities: entries.map(e => e.assetId),
-          evidence: {
-            fingerprint: fp,
-            tenantCount: tenantSet.size,
-            tenants: [...tenantSet],
-            assetCount: entries.length,
-          },
-          detectedAt: Date.now(),
-        });
-      }
-    }
-
+    const indicators: FraudIndicator[] = [
+      ...crossTenantFlags(
+        buildGlobalDocHashes(tenantIds, (tid) => this.buildTenantStats(tid)),
+        'hash', 'duplicate_document', 0.7, 0.1, (e) => e.entityId ?? '',
+      ),
+      ...crossTenantFlags(
+        buildGlobalMetaFingerprints(tenantIds, (tid) => this.buildTenantStats(tid)),
+        'fingerprint', 'metadata_clone', 0.6, 0.15, (e) => e.assetId ?? '',
+      ),
+    ];
     this.totalIndicators += indicators.length;
     this.adaptThresholds();
-
     return indicators;
   }
 
-  // ─── Aggregate Risk Score for a Business ────────────────────────────────────
-
   getRiskScore(businessId: string): number {
-    const allIndicators: FraudIndicator[] = [];
+    const all = new Map<string, FraudIndicator>();
     for (const indicators of this.scanHistory.values()) {
       for (const ind of indicators) {
-        if (ind.entities.includes(businessId) || this.indicatorMentionsBusiness(ind, businessId)) {
-          allIndicators.push(ind);
-        }
+        if (ind.entities.includes(businessId) || (ind.evidence as any).tenantId === businessId || (ind.evidence as any).businessId === businessId)
+          all.set(ind.indicatorId, ind);
       }
     }
-
-    if (allIndicators.length === 0) {
-      return 0;
-    }
-
-    // Weight by type severity and confidence
-    const typeWeights: Record<FraudIndicator['type'], number> = {
-      duplicate_document: 25,
-      rapid_listing: 20,
-      value_anomaly: 18,
-      metadata_clone: 22,
-    };
-
-    let rawScore = 0;
-    let totalWeight = 0;
-
-    for (const ind of allIndicators) {
-      const weight = typeWeights[ind.type];
-      rawScore += ind.confidence * weight;
-      totalWeight += weight;
-    }
-
-    // Normalize to 0-100
-    const normalized = totalWeight > 0 ? (rawScore / totalWeight) * 100 : 0;
-
-    // Cap at 100 and ensure minimum of 0
-    const score = Math.min(100, Math.max(0, Math.round(normalized * 100) / 100));
-
-    // Historical tracking
-    const history = this.riskHistory.get(businessId) ?? [];
-    history.push({
-      businessId,
-      riskScore: score,
-      indicatorIds: allIndicators.map(i => i.indicatorId),
-      calculatedAt: Date.now(),
-    });
-    this.riskHistory.set(businessId, history);
-
+    if (all.size === 0) return 0;
+    const weights: Record<string, number> = { duplicate_document: 25, rapid_listing: 20, value_anomaly: 18, metadata_clone: 22 };
+    let raw = 0, tw = 0;
+    for (const ind of all.values()) { const w = weights[ind.type]; raw += ind.confidence * w; tw += w; }
+    const score = Math.min(100, Math.max(0, Math.round((tw ? (raw / tw) * 100 : 0) * 100) / 100));
+    const hist = this.riskHistory.get(businessId) ?? [];
+    hist.push({ businessId, riskScore: score, indicatorIds: [...all.keys()], calculatedAt: Date.now() });
+    this.riskHistory.set(businessId, hist);
     return score;
   }
 
-  // ─── Get Risk Trend ─────────────────────────────────────────────────────────
+  getRiskTrend(businessId: string): RiskHistoryEntry[] { return this.riskHistory.get(businessId) ?? []; }
 
-  getRiskTrend(businessId: string): RiskHistoryEntry[] {
-    return this.riskHistory.get(businessId) ?? [];
-  }
-
-  // ─── Private: Build Statistics for a Tenant ─────────────────────────────────
+  // ─── Stats builder ───────────────────────────────────────────────────────────
 
   private buildTenantStats(tenantId: string): TenantStats {
-    const stats: TenantStats = {
-      tenantId,
-      bookingValues: [],
-      listingCreateTimes: [],
-      listingDeleteTimes: [],
-      documentHashes: new Map(),
-      rightAssetMetadata: new Map(),
-    };
+    const stats: TenantStats = { tenantId, bookingValues: [], listingCreateTimes: [],
+      listingDeleteTimes: [], documentHashes: new Map(), rightAssetMetadata: new Map() };
 
-    // Collect booking values
-    for (const booking of this.stores.bookings.values()) {
-      if ((booking.tenantId as string) === tenantId) {
-        const amount = booking.quotedAmountCents as number;
-        if (typeof amount === 'number') {
-          stats.bookingValues.push(amount);
-        }
-      }
+    for (const b of this.stores.bookings.values()) {
+      if ((b.tenantId as string) !== tenantId) continue;
+      const amount = b.quotedAmountCents as number;
+      if (typeof amount === 'number') stats.bookingValues.push(amount);
     }
 
-    // Collect listing data
-    for (const listing of this.stores.listings.values()) {
-      if ((listing.tenantId as string) === tenantId) {
-        const createdAt = listing.createdAt ?? listing.created_at;
-        if (typeof createdAt === 'string') {
-          stats.listingCreateTimes.push(new Date(createdAt).getTime());
-        }
-        const deletedAt = listing.deletedAt ?? listing.deleted_at;
-        if (typeof deletedAt === 'string') {
-          stats.listingDeleteTimes.push(new Date(deletedAt).getTime());
-        }
-
-        // Document hash
-        const docHash = listing.documentHash ?? listing.document_hash;
-        if (typeof docHash === 'string') {
-          const existing = stats.documentHashes.get(docHash) ?? [];
-          existing.push((listing.id ?? listing.entityId) as string);
-          stats.documentHashes.set(docHash, existing);
-        }
-      }
+    for (const l of this.stores.listings.values()) {
+      if ((l.tenantId as string) !== tenantId) continue;
+      const ca = l.createdAt ?? l.created_at;
+      if (typeof ca === 'string') stats.listingCreateTimes.push(new Date(ca).getTime());
+      const da = l.deletedAt ?? l.deleted_at;
+      if (typeof da === 'string') stats.listingDeleteTimes.push(new Date(da).getTime());
+      const dh = l.documentHash ?? l.document_hash;
+      if (typeof dh === 'string') { const ex = stats.documentHashes.get(dh) ?? [];
+        ex.push((l.id ?? l.entityId) as string); stats.documentHashes.set(dh, ex); }
     }
 
-    // Collect rights asset metadata fingerprints
-    for (const asset of this.stores.rightsAssets.values()) {
-      if ((asset.tenantId as string) === tenantId) {
-        const metadata = asset.metadata ?? {};
-        const fp = fingerprintMetadata(metadata);
-        const existing = stats.rightAssetMetadata.get(fp) ?? [];
-        existing.push((asset.id ?? asset.entityId) as string);
-        stats.rightAssetMetadata.set(fp, existing);
-      }
+    for (const a of this.stores.rightsAssets.values()) {
+      if ((a.tenantId as string) !== tenantId) continue;
+      const fp = fingerprintMetadata(a.metadata ?? {});
+      const ex = stats.rightAssetMetadata.get(fp) ?? [];
+      ex.push((a.id ?? a.entityId) as string); stats.rightAssetMetadata.set(fp, ex);
     }
 
-    // Collect document hashes from audit events for documents
     for (const evt of this.stores.auditEvents.all(tenantId)) {
       const e = evt as Record<string, unknown>;
       const meta = e.metadata as Record<string, unknown> | undefined;
-      const docHash = e.documentHash ?? e.document_hash ?? meta?.documentHash;
-      if (typeof docHash === 'string') {
-        const existing = stats.documentHashes.get(docHash) ?? [];
-        existing.push((evt.resourceId ?? evt.id) as string);
-        stats.documentHashes.set(docHash, existing);
-      }
+      const dh = e.documentHash ?? e.document_hash ?? meta?.documentHash;
+      if (typeof dh === 'string') { const ex = stats.documentHashes.get(dh) ?? [];
+        ex.push((e.resourceId ?? e.id) as string); stats.documentHashes.set(dh, ex); }
     }
 
     return stats;
   }
 
-  // ─── Private: Detection Methods ─────────────────────────────────────────────
-
-  private detectDuplicateDocuments(stats: TenantStats, tenantId: string): FraudIndicator[] {
-    const indicators: FraudIndicator[] = [];
-
-    for (const [hash, entityIds] of stats.documentHashes) {
-      if (entityIds.length > 1) {
-        const confidence = Math.min(1.0, 0.5 + (entityIds.length - 2) * 0.2);
-        indicators.push({
-          indicatorId: generateId(),
-          type: 'duplicate_document',
-          confidence,
-          entities: entityIds,
-          evidence: { hash, duplicateCount: entityIds.length, tenantId },
-          detectedAt: Date.now(),
-        });
-      }
-    }
-
-    return indicators;
-  }
+  // ─── Detection methods ──────────────────────────────────────────────────────
 
   private detectRapidListings(stats: TenantStats, tenantId: string): FraudIndicator[] {
-    const indicators: FraudIndicator[] = [];
-
-    // Sort create times
+    const out: FraudIndicator[] = [];
     const creates = [...stats.listingCreateTimes].sort((a, b) => a - b);
     const deletes = [...stats.listingDeleteTimes].sort((a, b) => a - b);
 
-    // Detect bursts of creation within rapidWindowMs
     if (creates.length >= this.rapidCountThreshold) {
       for (let i = 0; i <= creates.length - this.rapidCountThreshold; i++) {
-        const window = creates.slice(i, i + this.rapidCountThreshold);
-        const windowDuration = window[window.length - 1] - window[0];
-        if (windowDuration < this.rapidWindowMs) {
-          const confidence = Math.min(1.0, 0.6 + (1 - windowDuration / this.rapidWindowMs) * 0.4);
-          indicators.push({
-            indicatorId: generateId(),
-            type: 'rapid_listing',
-            confidence,
-            entities: [], // generic, not tied to specific entity IDs from timestamps alone
-            evidence: {
-              count: this.rapidCountThreshold,
-              windowMs: windowDuration,
-              thresholdMs: this.rapidWindowMs,
-              tenantId,
-            },
-            detectedAt: Date.now(),
-          });
-          break; // one burst flag per scan
+        const dur = creates[i + this.rapidCountThreshold - 1] - creates[i];
+        if (dur < this.rapidWindowMs) {
+          out.push({ indicatorId: generateId(), type: 'rapid_listing',
+            confidence: Math.min(1.0, 0.6 + (1 - dur / this.rapidWindowMs) * 0.4),
+            entities: [],
+            evidence: { count: this.rapidCountThreshold, windowMs: dur, thresholdMs: this.rapidWindowMs, tenantId },
+            detectedAt: Date.now() });
+          break;
         }
       }
     }
 
-    // Detect rapid create-then-delete cycles
     if (creates.length > 0 && deletes.length > 0) {
-      let rapidDeleteCount = 0;
-      for (const createTime of creates) {
-        for (const deleteTime of deletes) {
-          if (deleteTime > createTime && (deleteTime - createTime) < this.rapidWindowMs * 5) {
-            rapidDeleteCount++;
-          }
-        }
-      }
-      if (rapidDeleteCount >= 3) {
-        indicators.push({
-          indicatorId: generateId(),
-          type: 'rapid_listing',
-          confidence: Math.min(1.0, 0.4 + rapidDeleteCount * 0.1),
-          entities: [],
-          evidence: {
-            pattern: 'create_delete_cycle',
-            rapidDeleteCount,
-            tenantId,
-          },
-          detectedAt: Date.now(),
-        });
-      }
+      let rdc = 0;
+      for (const ct of creates) for (const dt of deletes) if (dt > ct && (dt - ct) < this.rapidWindowMs * 5) rdc++;
+      if (rdc >= 3) out.push({ indicatorId: generateId(), type: 'rapid_listing',
+        confidence: Math.min(1.0, 0.4 + rdc * 0.1), entities: [],
+        evidence: { pattern: 'create_delete_cycle', rapidDeleteCount: rdc, tenantId }, detectedAt: Date.now() });
     }
-
-    return indicators;
+    return out;
   }
 
   private detectValueAnomalies(stats: TenantStats, tenantId: string): FraudIndicator[] {
-    const indicators: FraudIndicator[] = [];
-
-    if (stats.bookingValues.length < 3) return indicators;
-
+    if (stats.bookingValues.length < 3) return [];
     const avg = mean(stats.bookingValues);
     const sd = stdDev(stats.bookingValues, avg);
+    if (sd === 0) return [];
 
-    if (sd === 0) return indicators;
-
-    const outlierIds: string[] = [];
-    const outlierValues: number[] = [];
+    const outlierIds: string[] = [], outlierValues: number[] = [];
     let maxZ = 0;
-
-    for (const booking of this.stores.bookings.values()) {
-      if ((booking.tenantId as string) !== tenantId) continue;
-      const amount = booking.quotedAmountCents as number;
+    for (const b of this.stores.bookings.values()) {
+      if ((b.tenantId as string) !== tenantId) continue;
+      const amount = b.quotedAmountCents as number;
       if (typeof amount !== 'number') continue;
-
       const z = zScore(amount, avg, sd);
-      if (z > this.zScoreThreshold) {
-        outlierIds.push((booking.id ?? booking.entityId) as string);
-        outlierValues.push(amount);
-        if (z > maxZ) maxZ = z;
-      }
+      if (z > this.zScoreThreshold) { outlierIds.push((b.id ?? b.entityId) as string); outlierValues.push(amount); if (z > maxZ) maxZ = z; }
     }
-
-    if (outlierIds.length > 0) {
-      const confidence = Math.min(1.0, 0.5 + (maxZ - this.zScoreThreshold) * 0.2);
-      indicators.push({
-        indicatorId: generateId(),
-        type: 'value_anomaly',
-        confidence,
-        entities: outlierIds,
-        evidence: {
-          mean: avg,
-          stdDev: sd,
-          threshold: this.zScoreThreshold,
-          outlierCount: outlierIds.length,
-          maxZScore: maxZ,
-          tenantId,
-        },
-        detectedAt: Date.now(),
-      });
-    }
-
-    return indicators;
+    if (outlierIds.length === 0) return [];
+    return [{
+      indicatorId: generateId(), type: 'value_anomaly',
+      confidence: Math.min(1.0, 0.5 + (maxZ - this.zScoreThreshold) * 0.2),
+      entities: outlierIds,
+      evidence: { mean: avg, stdDev: sd, threshold: this.zScoreThreshold, outlierCount: outlierIds.length, maxZScore: maxZ, tenantId },
+      detectedAt: Date.now(),
+    }];
   }
 
-  private detectMetadataClones(stats: TenantStats, tenantId: string): FraudIndicator[] {
-    const indicators: FraudIndicator[] = [];
+  // ─── Learning adaptation ─────────────────────────────────────────────────────
 
-    for (const [fp, assetIds] of stats.rightAssetMetadata) {
-      if (assetIds.length > 1) {
-        const confidence = Math.min(1.0, 0.5 + (assetIds.length - 2) * 0.25);
-        indicators.push({
-          indicatorId: generateId(),
-          type: 'metadata_clone',
-          confidence,
-          entities: assetIds,
-          evidence: {
-            fingerprint: fp,
-            cloneCount: assetIds.length,
-            tenantId,
-          },
-          detectedAt: Date.now(),
-        });
-      }
-    }
-
-    return indicators;
-  }
-
-  // ─── Private: Learning Adaptation ──────────────────────────────────────────
-
-  /**
-   * As more data flows through the system, detection thresholds tighten.
-   * This is the core "data network effect" — the moat widens with every scan.
-   */
   private adaptThresholds(): void {
-    // After 100 scans, tighten z-score by 5%
-    if (this.totalScans > 100 && this.zScoreThreshold > 2.0) {
-      this.zScoreThreshold = Math.max(2.0, this.zScoreThreshold - 0.05);
-    }
-    // After 500 scans, tighten by another 10%
-    if (this.totalScans > 500 && this.zScoreThreshold > 1.8) {
-      this.zScoreThreshold = Math.max(1.8, this.zScoreThreshold - 0.1);
-    }
-    // After 2000 scans, go down to 1.5 (very sensitive)
-    if (this.totalScans > 2000 && this.zScoreThreshold > 1.5) {
-      this.zScoreThreshold = Math.max(1.5, this.zScoreThreshold - 0.15);
-    }
-
-    // Tighten rapid listing window with more data
-    if (this.totalScans > 200 && this.rapidWindowMs > 30_000) {
-      this.rapidWindowMs = Math.max(30_000, this.rapidWindowMs - 5_000);
-    }
-    if (this.totalScans > 500 && this.rapidWindowMs > 15_000) {
-      this.rapidWindowMs = Math.max(15_000, this.rapidWindowMs - 5_000);
-    }
-
-    // Tighten rapid count threshold
-    if (this.totalScans > 300 && this.rapidCountThreshold > 3) {
-      this.rapidCountThreshold = Math.max(3, this.rapidCountThreshold - 1);
-    }
-  }
-
-  // ─── Private: Helper ────────────────────────────────────────────────────────
-
-  private indicatorMentionsBusiness(indicator: FraudIndicator, businessId: string): boolean {
-    const evidence = indicator.evidence;
-    if (evidence.businessId === businessId) return true;
-    if (evidence.tenantId === businessId) return true;
-    return false;
+    if (this.totalScans > 100 && this.zScoreThreshold > 2.0) this.zScoreThreshold = Math.max(2.0, this.zScoreThreshold - 0.05);
+    if (this.totalScans > 500 && this.zScoreThreshold > 1.8) this.zScoreThreshold = Math.max(1.8, this.zScoreThreshold - 0.1);
+    if (this.totalScans > 2000 && this.zScoreThreshold > 1.5) this.zScoreThreshold = Math.max(1.5, this.zScoreThreshold - 0.15);
+    if (this.totalScans > 200 && this.rapidWindowMs > 30_000) this.rapidWindowMs = Math.max(30_000, this.rapidWindowMs - 5_000);
+    if (this.totalScans > 500 && this.rapidWindowMs > 15_000) this.rapidWindowMs = Math.max(15_000, this.rapidWindowMs - 5_000);
+    if (this.totalScans > 300 && this.rapidCountThreshold > 3) this.rapidCountThreshold = Math.max(3, this.rapidCountThreshold - 1);
   }
 
   // ─── Configuration ──────────────────────────────────────────────────────────
 
-  setZScoreThreshold(threshold: number): void {
-    this.zScoreThreshold = Math.max(0.5, threshold);
-  }
-
-  setRapidWindow(windowMs: number): void {
-    this.rapidWindowMs = Math.max(5_000, windowMs);
-  }
-
-  setRapidCountThreshold(count: number): void {
-    this.rapidCountThreshold = Math.max(2, count);
-  }
+  setZScoreThreshold(threshold: number): void { this.zScoreThreshold = Math.max(0.5, threshold); }
+  setRapidWindow(windowMs: number): void { this.rapidWindowMs = Math.max(5_000, windowMs); }
+  setRapidCountThreshold(count: number): void { this.rapidCountThreshold = Math.max(2, count); }
 
   get currentThresholds() {
-    return {
-      zScore: this.zScoreThreshold,
-      rapidWindowMs: this.rapidWindowMs,
-      rapidCount: this.rapidCountThreshold,
-      totalScans: this.totalScans,
-      totalIndicators: this.totalIndicators,
-    };
+    return { zScore: this.zScoreThreshold, rapidWindowMs: this.rapidWindowMs,
+      rapidCount: this.rapidCountThreshold, totalScans: this.totalScans, totalIndicators: this.totalIndicators };
   }
 }

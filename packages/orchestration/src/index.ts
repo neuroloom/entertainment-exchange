@@ -64,6 +64,18 @@ export type {
   StabilityVerdict, EpochCallback,
 } from './nano/index.js';
 
+// Negotiation module — Moat 7: Autonomous Deal Negotiation (3-year moat)
+export { AutoNegotiator } from './negotiation/index.js';
+export type {
+  DealTerms as NegotiationDealTerms,
+  BATNA,
+  NegotiationRound,
+  NegotiationSession,
+  NegotiationResult,
+  NegotiationConstraints,
+  DealPriceRecord as NegotiationDealPriceRecord,
+} from './negotiation/index.js';
+
 // Marketplace exports (from neuroloom/velra + neuroloom/agent-exchange)
 export { AgentMarketplace, generateAgentReplies, EvidenceValidator, DealRoomEngine } from './marketplace/index.js';
 // Booking domain exports

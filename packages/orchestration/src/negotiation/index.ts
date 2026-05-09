@@ -6,5 +6,5 @@ export type {
   NegotiationSession,
   NegotiationResult,
   NegotiationConstraints,
-  HistoricalDeal,
+  DealPriceRecord,
 } from './auto-negotiator.js';

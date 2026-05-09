@@ -89,7 +89,7 @@ export interface NegotiationConstraints {
   historicalPricesCents?: number[]; // for BATNA computation
 }
 
-export interface HistoricalDeal {
+export interface DealPriceRecord {
   priceCents: number;
   listingId: string;
   category?: string;
@@ -175,12 +175,12 @@ function nowISO(): string {
 export class AutoNegotiator {
   private sessions = new Map<string, NegotiationSession>();
   private auditStore: MinimalAuditStore | null;
-  private historicalDeals: HistoricalDeal[] = [];
+  private historicalDeals: DealPriceRecord[] = [];
   private defaultConstraints: Required<Omit<NegotiationConstraints, 'historicalPricesCents'>>;
 
   constructor(opts?: {
     auditStore?: MinimalAuditStore;
-    historicalDeals?: HistoricalDeal[];
+    historicalDeals?: DealPriceRecord[];
     defaultConstraints?: NegotiationConstraints;
   }) {
     this.auditStore = opts?.auditStore ?? null;
