@@ -83,9 +83,12 @@ export async function pingPg(): Promise<boolean> {
 }
 
 export async function migrateForward(): Promise<string[]> {
-  // Dynamic import to avoid bundling migration runner into runtime unless needed
-  const { migrate } = await import('../../../../packages/db/src/migrate.js');
-  return migrate();
+  try {
+    // Dynamic import — tsx resolves .js → .ts in dev, tsc emits .js in prod
+    const mod = await import('../../../../packages/db/src/migrate.js');
+    if (typeof mod.migrate === 'function') return await mod.migrate();
+  } catch { /* migration module unavailable or no DATABASE_URL */ }
+  return [];
 }
 
 // ── In-Memory Store with PG persistence + hydration ─────────────────────────

@@ -387,6 +387,23 @@ export async function rightsRoutes(app: FastifyInstance) {
     });
   });
 
+  app.delete('/passports/:id', async (req, reply) => {
+    const ctx = (req as any).ctx;
+    if (!ctx?.tenantId) throw AppError.tenantRequired();
+    if (!ctx.actor.permissions.includes('rights:issue')) throw AppError.forbidden('Missing rights:issue permission');
+
+    const passport = passports.get((req.params as any).id);
+    if (!passport || passport.tenantId !== ctx.tenantId) throw AppError.notFound('Passport');
+    if (passport.status === 'revoked') throw AppError.invalid('Passport already revoked');
+
+    passport.status = 'revoked';
+    passports.set(passport);
+
+    writeAudit(ctx, 'passport.delete', 'rights_passport', passport.id,
+      assets.get(passport.rightsAssetId)?.businessId);
+    reply.send({ data: passport });
+  });
+
   // ═══ Business Transferability Scoring ════════════════════════════════════════
 
   app.get('/businesses/:id/transferability', async (req, reply) => {

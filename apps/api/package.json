@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "seed": "tsx src/seed.ts"
   },
   "dependencies": {
