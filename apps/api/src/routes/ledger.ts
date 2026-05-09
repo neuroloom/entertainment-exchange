@@ -51,6 +51,7 @@ function seedDefaultAccounts(businessId: string, tenantId: string) {
     { code: '5000', name: 'Provider Fees', type: 'expense' },
   ].map(a => ({
     id: uuid(), tenantId, businessId, code: a.code, name: a.name, accountType: a.type, currency: 'USD',
+    status: 'active', isDefault: true,
   })));
 }
 
@@ -71,7 +72,8 @@ export async function ledgerRoutes(app: FastifyInstance) {
     if (!businessId) throw AppError.invalid('businessId query parameter required');
 
     seedDefaultAccounts(businessId, ctx.tenantId);
-    reply.send({ data: accounts.get(businessId) ?? [] });
+    const all = (accounts.get(businessId) ?? []).filter((a: any) => a.status !== 'archived');
+    reply.send({ data: all });
   });
 
   app.get('/accounts/:id', async (req, reply) => {
@@ -81,7 +83,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
     if (!businessId) throw AppError.invalid('businessId query parameter required');
 
     seedDefaultAccounts(businessId, ctx.tenantId);
-    const accts = accounts.get(businessId) ?? [];
+    const accts = (accounts.get(businessId) ?? []).filter((a: any) => a.status !== 'archived');
     const account = accts.find((a: any) => a.id === (req.params as any).id);
     if (!account) throw AppError.notFound('Account');
     reply.send({ data: account });

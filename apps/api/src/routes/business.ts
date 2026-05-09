@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
-import type { PaginatedResponse } from '@entertainment-exchange/shared';
+import { paginate, paginatedResponse } from '../plugins/paginate.plugin.js';
 import { MemoryStore, AuditStore } from '../services/repo.js';
 import { getOrCreateAccounts, journalStore } from './ledger.js';
 
@@ -87,16 +87,11 @@ export async function businessRoutes(app: FastifyInstance) {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
 
-    const query = req.query as Record<string, string>;
-    const limit = query.limit ? parseInt(query.limit, 10) : 50;
-    const offset = query.offset ? parseInt(query.offset, 10) : 0;
-
+    const p = paginate(req.query);
     const all = businesses.all(ctx.tenantId);
-    const total = all.length;
-    const data = all.slice(offset, offset + limit);
+    const sliced = all.slice(p.offset, p.offset + p.limit);
 
-    const response: PaginatedResponse<typeof data[number]> = { data, total, limit, offset };
-    reply.send(response);
+    reply.send(paginatedResponse(sliced, all.length, p));
   });
 
   app.get('/businesses/:id', async (req, reply) => {
@@ -212,11 +207,9 @@ export async function businessRoutes(app: FastifyInstance) {
     if (query.action) events = events.filter((e: any) => e.action === query.action);
     if (query.businessId) events = events.filter((e: any) => e.businessId === query.businessId);
 
-    const limit = parseInt(query.limit, 10) || 50;
-    const offset = parseInt(query.offset, 10) || 0;
-    const total = events.length;
-    const data = events.slice(offset, offset + limit);
+    const p = paginate(req.query);
+    const sliced = events.slice(p.offset, p.offset + p.limit);
 
-    reply.send({ data, total, limit, offset });
+    reply.send(paginatedResponse(sliced, events.length, p));
   });
 }

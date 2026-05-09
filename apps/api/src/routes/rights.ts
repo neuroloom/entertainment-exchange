@@ -5,7 +5,12 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
+import { paginate, paginatedResponse } from '../plugins/paginate.plugin.js';
 import { MemoryStore, AuditStore } from '../services/repo.js';
+import { journalStore, getOrCreateAccounts } from './ledger.js';
+import { bookings } from './booking.js';
+import { agents } from './agent.js';
+import { listings, deals } from './marketplace.js';
 import {
   PassportVerifier,
   TransferabilityScorer,
@@ -91,15 +96,11 @@ export async function rightsRoutes(app: FastifyInstance) {
   app.get('/anchors', async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
+    const p = paginate(req.query);
     const all = anchors.all(ctx.tenantId);
-    const limit = parseInt((req.query as any)?.limit, 10) || 0;
-    const offset = parseInt((req.query as any)?.offset, 10) || 0;
-    if (limit > 0) {
-      const page = all.slice(offset, offset + limit);
-      reply.send({ data: page, total: all.length, limit, offset });
-    } else {
-      reply.send({ data: all });
-    }
+    const sliced = all.slice(p.offset, p.offset + p.limit);
+
+    reply.send(paginatedResponse(sliced, all.length, p));
   });
 
   app.get('/anchors/:id', async (req, reply) => {
@@ -180,15 +181,11 @@ export async function rightsRoutes(app: FastifyInstance) {
   app.get('/assets', async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
+    const p = paginate(req.query);
     const all = assets.all(ctx.tenantId);
-    const limit = parseInt((req.query as any)?.limit, 10) || 0;
-    const offset = parseInt((req.query as any)?.offset, 10) || 0;
-    if (limit > 0) {
-      const page = all.slice(offset, offset + limit);
-      reply.send({ data: page, total: all.length, limit, offset });
-    } else {
-      reply.send({ data: all });
-    }
+    const sliced = all.slice(p.offset, p.offset + p.limit);
+
+    reply.send(paginatedResponse(sliced, all.length, p));
   });
 
   app.patch('/assets/:id', {
@@ -304,15 +301,11 @@ export async function rightsRoutes(app: FastifyInstance) {
   app.get('/passports', async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
+    const p = paginate(req.query);
     const all = passports.all(ctx.tenantId);
-    const limit = parseInt((req.query as any)?.limit, 10) || 0;
-    const offset = parseInt((req.query as any)?.offset, 10) || 0;
-    if (limit > 0) {
-      const page = all.slice(offset, offset + limit);
-      reply.send({ data: page, total: all.length, limit, offset });
-    } else {
-      reply.send({ data: all });
-    }
+    const sliced = all.slice(p.offset, p.offset + p.limit);
+
+    reply.send(paginatedResponse(sliced, all.length, p));
   });
 
   app.get('/passports/:id', async (req, reply) => {
@@ -452,6 +445,71 @@ export async function rightsRoutes(app: FastifyInstance) {
       ? Math.ceil((Date.now() - new Date(firstAudit.createdAt).getTime()) / 86_400_000)
       : 0;
 
+    // ── Compute revenue history from journal entries ──────────────────────────
+    const bizJournals = journalStore.listJournals(ctx.tenantId, businessId);
+    const accts = getOrCreateAccounts(businessId, ctx.tenantId);
+    const revenueAcct = accts.find((a: any) => a.code === '4000');
+    let revenueHistoryMonths = 0;
+    let totalRevenueCents = 0;
+    if (revenueAcct && bizJournals.length > 0) {
+      const monthSet = new Set<string>();
+      for (const j of bizJournals) {
+        const d = j.occurredAt ? new Date(j.occurredAt) : null;
+        if (d && !isNaN(d.getTime())) {
+          monthSet.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+        }
+        // Sum recognized revenue entries for account 4000
+        const entries = journalStore.getEntries(j.id);
+        for (const e of entries) {
+          if (e.accountId === revenueAcct.id && e.direction === 'credit') {
+            totalRevenueCents += e.amountCents;
+          }
+        }
+      }
+      revenueHistoryMonths = monthSet.size;
+    }
+    const monthlyRevenueAvg = revenueHistoryMonths > 0
+      ? Math.round(totalRevenueCents / revenueHistoryMonths)
+      : 0;
+
+    // ── Marketplace listings for this business ─────────────────────────────────
+    const marketplaceListings = listings.all(ctx.tenantId).filter(
+      (l: any) => l.sellerBusinessId === businessId,
+    ).length;
+
+    // ── Marketplace sales (deals for this business) ────────────────────────────
+    let marketplaceSales = 0;
+    for (const dlist of deals.values()) {
+      const bizDeals = dlist.filter((d: any) =>
+        d.tenantId === ctx.tenantId &&
+        (d.sellerBusinessId === businessId || d.buyerBusinessId === businessId),
+      );
+      marketplaceSales += bizDeals.length;
+    }
+
+    // ── Agent automation level (avg autonomyLevel of active agents) ────────────
+    const bizAgents = agents.all(ctx.tenantId).filter(
+      (a: any) => a.businessId === businessId && a.status === 'active',
+    );
+    let agentAutomationLevel = 0;
+    if (bizAgents.length > 0) {
+      const totalAutonomy = bizAgents.reduce((sum: number, a: any) => sum + (a.autonomyLevel ?? 0), 0);
+      // Convert from 0-5 scale to 0-100 for the scorer
+      agentAutomationLevel = Math.round((totalAutonomy / bizAgents.length) * 20);
+    }
+
+    // ── Booking completion rate ────────────────────────────────────────────────
+    const bizBookings = bookings.all(ctx.tenantId).filter(
+      (b: any) => b.businessId === businessId,
+    );
+    let bookingCompletionRate = 0;
+    if (bizBookings.length > 0) {
+      const completed = bizBookings.filter(
+        (b: any) => b.status === 'completed',
+      ).length;
+      bookingCompletionRate = Math.round((completed / bizBookings.length) * 100) / 100;
+    }
+
     const profile: BusinessProfile = {
       id: businessId,
       chainOfTitleUnbroken: chainChecks.every(Boolean) && chainChecks.length > 0,
@@ -461,12 +519,12 @@ export async function rightsRoutes(app: FastifyInstance) {
       disputeCount,
       passportExpired: isExpired,
       passportExpiresInDays: minExpiryDays,
-      revenueHistoryMonths: 0,         // stub — wired from billing service
-      monthlyRevenueAvg: 0,            // stub
-      marketplaceListings: 0,          // stub — wired from marketplace service
-      marketplaceSales: 0,             // stub
-      agentAutomationLevel: 0,         // stub — wired from agent metrics
-      bookingCompletionRate: 0,        // stub — wired from booking service
+      revenueHistoryMonths,
+      monthlyRevenueAvg,
+      marketplaceListings,
+      marketplaceSales,
+      agentAutomationLevel,
+      bookingCompletionRate,
       platformTenureDays,
     };
 

@@ -1,4 +1,16 @@
 // Auth plugin — JWT sign/verify with jose, permission enforcement, CORS
+//
+// ── Permission Matrix ──────────────────────────────────────────────────────
+// business:create  — POST /businesses
+// business:manage  — PUT/DELETE /businesses/:id
+// booking:create   — POST /bookings
+// booking:confirm  — PATCH /bookings/:id/status, POST /bookings/:id/cancel
+// agent:run        — All agent CRUD + runs
+// listing:publish  — All marketplace listing operations
+// deal:close       — All marketplace deal operations
+// payment:create   — All ledger journal + revenue operations
+// rights:issue     — All rights anchor/asset/passport operations
+// audit:view       — GET /audit
 import type { FastifyInstance, FastifyRequest, preHandlerHookHandler } from 'fastify';
 import * as jose from 'jose';
 import { AppError } from './errorHandler.js';
