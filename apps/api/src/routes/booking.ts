@@ -150,7 +150,7 @@ export async function bookingRoutes(app: FastifyInstance) {
   }, async (req, reply) => {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
-    if (!ctx.actor.permissions.includes('booking:create')) throw AppError.forbidden('Missing booking:create permission');
+    if (!ctx.actor.permissions.includes('booking:manage')) throw AppError.forbidden('Missing booking:manage permission');
 
     const booking = bookings.get((req.params as any).id);
     if (!booking || booking.tenantId !== ctx.tenantId) throw AppError.notFound('Booking');

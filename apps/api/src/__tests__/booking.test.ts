@@ -654,7 +654,7 @@ describe('POST /api/v1/bookings/:id/cancel — reversal journal', () => {
 });
 
 describe('PUT /api/v1/bookings/:id', () => {
-  it('returns 200 with valid booking:create permission', async () => {
+  it('returns 200 with valid booking:manage permission', async () => {
     const createRes = await app.inject({
       method: 'POST',
       url: '/api/v1/bookings',
@@ -666,7 +666,10 @@ describe('PUT /api/v1/bookings/:id', () => {
     const res = await app.inject({
       method: 'PUT',
       url: `/api/v1/bookings/${bookingId}`,
-      headers: BASE_HEADERS,
+      headers: {
+        'x-tenant-id': TENANT,
+        'x-actor-permissions': 'booking:manage',
+      },
       payload: { eventName: 'Updated Event Name' },
     });
 
@@ -675,7 +678,7 @@ describe('PUT /api/v1/bookings/:id', () => {
     expect(body.data.eventName).toBe('Updated Event Name');
   });
 
-  it('returns 403 without booking:create permission', async () => {
+  it('returns 403 without booking:manage permission', async () => {
     // Create a booking
     const createRes = await app.inject({
       method: 'POST',
@@ -698,14 +701,17 @@ describe('PUT /api/v1/bookings/:id', () => {
     expect(res.statusCode).toBe(403);
     const body = JSON.parse(res.body);
     expect(body.error.code).toBe('FORBIDDEN');
-    expect(body.error.message).toContain('booking:create');
+    expect(body.error.message).toContain('booking:manage');
   });
 
   it('returns 404 for nonexistent booking', async () => {
     const res = await app.inject({
       method: 'PUT',
       url: '/api/v1/bookings/00000000-0000-0000-0000-000000000000',
-      headers: BASE_HEADERS,
+      headers: {
+        'x-tenant-id': TENANT,
+        'x-actor-permissions': 'booking:manage',
+      },
       payload: { eventName: 'Ghost Update' },
     });
 
