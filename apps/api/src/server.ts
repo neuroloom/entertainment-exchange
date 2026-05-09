@@ -25,7 +25,14 @@ export async function buildServer() {
   // Request context — decorator + hook directly on root so ALL children inherit
   app.decorateRequest('ctx', null as unknown as RequestContext);
   app.addHook('onRequest', async (req) => {
-    const perms = (req.headers['x-actor-permissions'] as string)?.split(',').map(s => s.trim()) ?? [];
+    // Tenant/business from headers for routing. Permissions come ONLY from verified JWT.
+    const isTest = process.env.NODE_ENV === 'test';
+    const headerPerms = isTest
+      ? (req.headers['x-actor-permissions'] as string)?.split(',').map(s => s.trim()) ?? []
+      : [];
+    const headerActorId = isTest ? ((req.headers['x-actor-id'] as string) || 'anonymous') : 'anonymous';
+    const headerActorType = isTest ? ((req.headers['x-actor-type'] as any) || 'system') : 'system';
+
     const traceId = (req.headers['x-trace-id'] as string) ?? uuid();
     (req as any).ctx = {
       requestId: uuid(),
@@ -33,11 +40,11 @@ export async function buildServer() {
       tenantId: (req.headers['x-tenant-id'] as string) ?? '',
       businessId: (req.headers['x-business-id'] as string) ?? undefined,
       actor: {
-        type: (req.headers['x-actor-type'] as any) ?? 'system',
-        id: (req.headers['x-actor-id'] as string) ?? 'anonymous',
-        userId: (req.headers['x-actor-id'] as string) ?? undefined,
+        type: headerActorType,
+        id: headerActorId,
+        userId: headerActorId !== 'anonymous' ? headerActorId : undefined,
         roles: [],
-        permissions: perms,
+        permissions: headerPerms,
       },
     };
     setCurrentTraceId(traceId);
@@ -58,12 +65,15 @@ export async function buildServer() {
   // Error handler — directly on root so ALL children inherit
   await errorHandlerPlugin(app);
 
-  // CORS — allow configured origins
+  // CORS — allow configured origins (production: set CORS_ORIGINS explicitly)
   const corsOrigins = (process.env.CORS_ORIGINS ?? '').split(',').filter(Boolean);
+  if (corsOrigins.length === 0 && process.env.NODE_ENV === 'production') {
+    app.log.warn('CORS_ORIGINS not set in production — cross-origin requests will be denied');
+  }
   app.addHook('onRequest', async (req, reply) => {
     const origin = req.headers.origin;
     if (!origin) return;
-    const allowed = corsOrigins.length === 0 || corsOrigins.includes(origin);
+    const allowed = corsOrigins.length > 0 && corsOrigins.includes(origin);
     if (!allowed) return;
     reply.header('Access-Control-Allow-Origin', origin);
     reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
@@ -136,13 +146,31 @@ if (isMain) {
   })();
 }
 
-// Global error boundaries — catch the uncaught
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+// Global error boundaries — attempt graceful shutdown before exit
+let _shuttingDown = false;
+
+async function gracefulShutdown(server: Awaited<ReturnType<typeof buildServer>> | null) {
+  if (_shuttingDown) return;
+  _shuttingDown = true;
+  try {
+    if (server) {
+      await Promise.race([
+        server.close(),
+        new Promise(r => setTimeout(r, 5000)), // 5s timeout
+      ]);
+    }
+    const { closeRepoPool } = await import('./services/repo.js');
+    await closeRepoPool();
+  } catch { /* best effort */ }
   process.exit(1);
+}
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled Rejection:', reason);
+  gracefulShutdown(null);
 });
 
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
-  process.exit(1);
+  gracefulShutdown(null);
 });

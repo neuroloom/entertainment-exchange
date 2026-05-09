@@ -41,17 +41,34 @@ export async function createToken(userId: string, tenantId: string, permissions:
     .sign(secret);
 }
 
-export async function verifyToken(token: string): Promise<JwtPayload | null> {
+export interface TokenResult {
+  payload: JwtPayload | null;
+  error?: 'expired' | 'malformed' | 'invalid';
+}
+
+export async function verifyToken(token: string): Promise<TokenResult> {
   try {
     const secret = getSecretKey();
     const { payload } = await jose.jwtVerify(token, secret, { algorithms: [JWT_ALG] });
-    if (!payload.sub || !payload.tenant || !Array.isArray(payload.permissions)) return null;
+    if (!payload.sub || !payload.tenant || !Array.isArray(payload.permissions)) {
+      return { payload: null, error: 'invalid' };
+    }
     return {
-      sub: payload.sub, tenant: payload.tenant as string,
-      permissions: payload.permissions as string[],
-      iat: payload.iat, exp: payload.exp,
+      payload: {
+        sub: payload.sub, tenant: payload.tenant as string,
+        permissions: payload.permissions as string[],
+        iat: payload.iat, exp: payload.exp,
+      },
     };
-  } catch { return null; }
+  } catch (err: any) {
+    if (err?.code === 'ERR_JWT_EXPIRED') return { payload: null, error: 'expired' };
+    return { payload: null, error: 'malformed' };
+  }
+}
+
+// Legacy wrapper for code that expects the old signature
+export async function verifyTokenPayload(token: string): Promise<JwtPayload | null> {
+  return (await verifyToken(token)).payload;
 }
 
 // ── Refresh token ───────────────────────────────────────────────────────────
@@ -93,8 +110,13 @@ export async function authPlugin(app: FastifyInstance) {
     if (!authHeader) return;
     const parts = authHeader.split(' ');
     if (parts.length !== 2 || parts[0].toLowerCase() !== 'bearer') return;
-    const payload = await verifyToken(parts[1]);
-    if (!payload) return;
+    const { payload, error } = await verifyToken(parts[1]);
+    if (!payload) {
+      if (error === 'expired') {
+        (req as any)._tokenExpired = true;
+      }
+      return;
+    }
     const reqCtx = (req as any).ctx;
     if (reqCtx) {
       (req as any).ctx = {

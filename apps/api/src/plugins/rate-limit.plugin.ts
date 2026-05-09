@@ -87,15 +87,16 @@ export async function rateLimitPlugin(
   });
 }
 
-/** Extract the client IP from the request, checking common proxy headers */
+/** Extract the client IP from the request.
+ *  Only trusts proxy headers when TRUST_PROXY is set (e.g. behind nginx/load balancer).
+ *  Otherwise uses the direct connection IP to prevent X-Forwarded-For spoofing. */
 function getClientIp(req: FastifyRequest): string {
-  const xff = req.headers['x-forwarded-for'] as string | undefined;
-  if (xff) {
-    return xff.split(',')[0].trim();
-  }
-  const realIp = req.headers['x-real-ip'] as string | undefined;
-  if (realIp) {
-    return realIp;
+  const trustProxy = process.env.TRUST_PROXY === 'true';
+  if (trustProxy) {
+    const xff = req.headers['x-forwarded-for'] as string | undefined;
+    if (xff) return xff.split(',')[0].trim();
+    const realIp = req.headers['x-real-ip'] as string | undefined;
+    if (realIp) return realIp;
   }
   return req.ip;
 }

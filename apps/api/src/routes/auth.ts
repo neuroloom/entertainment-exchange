@@ -5,6 +5,7 @@ import { v4 as uuid } from 'uuid';
 import { createToken, generateRefreshToken, refreshTokenExpiresAt, withAuth } from '../plugins/auth.plugin.js';
 import { AppError } from '../plugins/errorHandler.js';
 import { MemoryStore } from '../services/repo.js';
+import { storeRefreshToken as persistRefreshToken, consumeRefreshToken } from '../services/token-store.js';
 
 // ── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -65,7 +66,6 @@ async function verifyPassword(password: string, stored: string): Promise<boolean
 const users = new MemoryStore('users');
 const tenants = new MemoryStore('tenants');
 const memberships = new MemoryStore('memberships');
-const refreshTokens = new Map<string, { userId: string; tenantId: string; expiresAt: number }>();
 
 // ── Routes ──────────────────────────────────────────────────────────────────
 
@@ -143,11 +143,7 @@ export async function authRoutes(app: FastifyInstance) {
     const permissions = ['business:create', 'business:manage'];
     const token = await createToken(user.id, user.tenantId, permissions);
     const refreshToken = generateRefreshToken();
-    refreshTokens.set(refreshToken, {
-      userId: user.id,
-      tenantId: user.tenantId,
-      expiresAt: refreshTokenExpiresAt(),
-    });
+    persistRefreshToken(refreshToken, user.id, user.tenantId, refreshTokenExpiresAt());
 
     (req as any).ctx = {
       requestId: uuid(), traceId: uuid(),
@@ -170,22 +166,16 @@ export async function authRoutes(app: FastifyInstance) {
     },
   }, async (req, reply) => {
     const { refreshToken } = RefreshSchema.parse(req.body);
-    const stored = refreshTokens.get(refreshToken);
-    if (!stored || stored.expiresAt < Date.now()) {
-      refreshTokens.delete(refreshToken); // clean up expired
+    const stored = consumeRefreshToken(refreshToken);
+    if (!stored) {
       throw AppError.unauthenticated('Invalid or expired refresh token');
     }
 
-    // Rotate: delete old, issue new
-    refreshTokens.delete(refreshToken);
+    // Issue new rotated token
     const permissions = ['business:create', 'business:manage'];
     const token = await createToken(stored.userId, stored.tenantId, permissions);
     const newRefresh = generateRefreshToken();
-    refreshTokens.set(newRefresh, {
-      userId: stored.userId,
-      tenantId: stored.tenantId,
-      expiresAt: refreshTokenExpiresAt(),
-    });
+    persistRefreshToken(newRefresh, stored.userId, stored.tenantId, refreshTokenExpiresAt());
 
     reply.send({ data: { token, refreshToken: newRefresh } });
   });

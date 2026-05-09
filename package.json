@@ -9,15 +9,6 @@
     "dev": "cd apps/api && npm run dev",
     "build": "npm run build --workspaces",
     "test": "npm run test --workspaces",
-    "lint": "npm run lint --workspaces",
     "typecheck": "npm run typecheck --workspaces"
-  },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.95.0",
-    "@neuroloom/openclaw": "github:neuroloom/neuroloom-openclawx",
-    "@neuroloom/warpcore": "github:neuroloomorg/neuroloom-warpcore"
-  },
-  "devDependencies": {
-    "pg": "^8.20.0"
   }
 }

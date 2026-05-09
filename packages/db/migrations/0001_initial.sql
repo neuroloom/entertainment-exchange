@@ -249,3 +249,30 @@ CREATE INDEX idx_audit_tenant ON audit_events(tenant_id, created_at DESC);
 CREATE INDEX idx_agents_tenant ON agents(tenant_id, status);
 CREATE INDEX idx_listings_tenant ON marketplace_listings(tenant_id, listing_type, status);
 CREATE INDEX idx_agent_runs_agent ON agent_runs(tenant_id, agent_id, started_at DESC);
+
+-- RLS Policies — tenant isolation via app.current_tenant_id
+-- RLS is enabled on all tenant-scoped tables above. Without policies,
+-- PostgreSQL's default-deny behavior returns zero rows for all queries.
+CREATE POLICY tenant_isolation ON business_entities FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+CREATE POLICY tenant_isolation ON clients FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+CREATE POLICY tenant_isolation ON artist_profiles FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+CREATE POLICY tenant_isolation ON venues FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+CREATE POLICY tenant_isolation ON bookings FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+CREATE POLICY tenant_isolation ON agents FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+CREATE POLICY tenant_isolation ON agent_runs FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+CREATE POLICY tenant_isolation ON ledger_accounts FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+CREATE POLICY tenant_isolation ON ledger_journals FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+CREATE POLICY tenant_isolation ON ledger_entries FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+CREATE POLICY tenant_isolation ON revenue_events FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+CREATE POLICY tenant_isolation ON marketplace_listings FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+CREATE POLICY tenant_isolation ON deal_rooms FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+CREATE POLICY tenant_isolation ON legal_anchors FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+CREATE POLICY tenant_isolation ON rights_assets FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+CREATE POLICY tenant_isolation ON rights_passports FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+CREATE POLICY tenant_isolation ON audit_events FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+
+-- Also enable RLS + policies on users and memberships (they have tenant_id too)
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memberships ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON users FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+CREATE POLICY tenant_isolation ON memberships FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::uuid);

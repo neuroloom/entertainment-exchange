@@ -44,7 +44,8 @@ export async function errorHandlerPlugin(app: FastifyInstance) {
       });
     }
 
-    app.log.error(error);
+    const errMsg = (error instanceof Error) ? error.message : String(error);
+    app.log.error({ err: errMsg, code: (error as any)?.code }, 'unhandled error');
     return reply.status(500).send({
       error: { code: 'INTERNAL', message: 'Internal server error', requestId: (req as any).ctx?.requestId },
     });
