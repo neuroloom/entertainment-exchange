@@ -38,7 +38,7 @@ export function consumeRefreshToken(token: string): StoredToken | undefined {
   return stored;
 }
 
-export function cleanupExpiredTokens(): number {
+export async function cleanupExpiredTokens(): Promise<number> {
   const now = Date.now();
   let cleaned = 0;
   for (const [k, v] of inMemoryFallback) {
@@ -48,10 +48,12 @@ export function cleanupExpiredTokens(): number {
       cleaned++;
     }
   }
-  // Background: also sweep PG rows (best-effort)
-  const pool = (store as any)._pool;
-  if (pool) {
-    pool.query('DELETE FROM refresh_tokens WHERE expires_at < $1', [now]).catch(() => {});
+  // Sweep store values that were hydrated from PG but not in the in-memory fallback
+  for (const item of store.values()) {
+    if (item.expiresAt < now) {
+      store.delete(item.id);
+      cleaned++;
+    }
   }
   return cleaned;
 }

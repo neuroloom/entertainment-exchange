@@ -53,6 +53,15 @@ function seedDefaultAccounts(businessId: string, tenantId: string) {
   })));
 }
 
+/**
+ * Get or create the default chart of accounts for a business.
+ * This is the single source of truth for chart of accounts, shared by business.ts and ledger.ts.
+ */
+export function getOrCreateAccounts(businessId: string, tenantId: string): any[] {
+  seedDefaultAccounts(businessId, tenantId);
+  return accounts.get(businessId) ?? [];
+}
+
 export async function ledgerRoutes(app: FastifyInstance) {
   app.get('/accounts', async (req, reply) => {
     const ctx = (req as any).ctx;

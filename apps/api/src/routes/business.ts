@@ -7,6 +7,7 @@ import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
 import type { PaginatedResponse } from '@entertainment-exchange/shared';
 import { MemoryStore, AuditStore } from '../services/repo.js';
+import { getOrCreateAccounts, journalStore } from './ledger.js';
 
 const CreateBusinessSchema = z.object({
   name: z.string().min(1),
@@ -22,17 +23,7 @@ const UpdateBusinessSchema = z.object({
 
 // In-memory stores with optional PG write-through
 const businesses = new MemoryStore('businesses');
-const ledgerAccounts = new Map<string, any[]>();
 const auditEvents = new AuditStore();
-
-const DEFAULT_CHART_OF_ACCOUNTS = [
-  { code: '1000', name: 'Cash / Stripe Clearing', type: 'asset' },
-  { code: '2000', name: 'Deferred Revenue', type: 'liability' },
-  { code: '2100', name: 'Artist/Vendor Payable', type: 'liability' },
-  { code: '4000', name: 'Booking Revenue', type: 'revenue' },
-  { code: '4100', name: 'Commission Revenue', type: 'revenue' },
-  { code: '5000', name: 'Provider Fees', type: 'expense' },
-];
 
 function writeAudit(ctx: any, action: string, resourceType: string, resourceId: string, businessId?: string, metadata?: Record<string, unknown>) {
   auditEvents.push({
@@ -43,10 +34,11 @@ function writeAudit(ctx: any, action: string, resourceType: string, resourceId: 
 }
 
 /** Lookup helper for booking reversal — returns code→accountId map for a business.
- *  Imported by booking.ts when creating reversal journal entries. */
-export function getBusinessAccountMap(businessId: string): Map<string, string> {
+ *  Imported by booking.ts when creating reversal journal entries.
+ *  Uses the ledger's single source of truth for chart of accounts. */
+export function getBusinessAccountMap(businessId: string, tenantId = ''): Map<string, string> {
   const map = new Map<string, string>();
-  const accounts = ledgerAccounts.get(businessId) ?? [];
+  const accounts = getOrCreateAccounts(businessId, tenantId);
   for (const a of accounts) {
     map.set(a.code, a.id);
   }
@@ -82,11 +74,8 @@ export async function businessRoutes(app: FastifyInstance) {
     };
     businesses.set(business);
 
-    // Default chart of accounts
-    const accounts = DEFAULT_CHART_OF_ACCOUNTS.map(a => ({
-      id: uuid(), tenantId: ctx.tenantId, businessId, code: a.code, name: a.name, accountType: a.type, currency: 'USD',
-    }));
-    ledgerAccounts.set(businessId, accounts);
+    // Default chart of accounts — single source of truth from ledger
+    const accounts = getOrCreateAccounts(businessId, ctx.tenantId);
 
     // Audit
     writeAudit(ctx, 'business.create', 'business', businessId, businessId);
