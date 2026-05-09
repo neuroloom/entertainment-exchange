@@ -339,7 +339,9 @@ export class FraudDetector {
 
     // Collect document hashes from audit events for documents
     for (const evt of this.stores.auditEvents.all(tenantId)) {
-      const docHash = evt.documentHash ?? evt.document_hash ?? evt.metadata?.documentHash;
+      const e = evt as Record<string, unknown>;
+      const meta = e.metadata as Record<string, unknown> | undefined;
+      const docHash = e.documentHash ?? e.document_hash ?? meta?.documentHash;
       if (typeof docHash === 'string') {
         const existing = stats.documentHashes.get(docHash) ?? [];
         existing.push((evt.resourceId ?? evt.id) as string);

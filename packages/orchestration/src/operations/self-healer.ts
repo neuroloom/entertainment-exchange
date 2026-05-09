@@ -80,6 +80,26 @@ class MemoryStore<T> {
   get size(): number { return this.store.size; }
 }
 
+// ─── Error ──────────────────────────────────────────────────────────────────────
+
+class OpsError extends Error {
+  constructor(
+    message: string,
+    public readonly code: string,
+  ) {
+    super(message);
+    this.name = 'OpsError';
+  }
+
+  static notFound(resource: string): OpsError {
+    return new OpsError(`${resource} not found`, 'NOT_FOUND');
+  }
+
+  static invalid(msg: string): OpsError {
+    return new OpsError(msg, 'INVALID_INPUT');
+  }
+}
+
 // ─── Utility ────────────────────────────────────────────────────────────────────
 
 function clamp(val: number, min: number, max: number): number {
@@ -110,7 +130,7 @@ export class SelfHealer {
       if (state.breaker.resetsAt && now >= state.breaker.resetsAt) {
         this.resetBreaker(state, agentId);
       } else {
-        throw AppError.invalid(
+        throw OpsError.invalid(
           `Agent ${agentId} is paused by circuit breaker. Resets at ${state.breaker.resetsAt ? new Date(state.breaker.resetsAt).toISOString() : 'N/A'}`,
         );
       }
@@ -130,10 +150,10 @@ export class SelfHealer {
   /** Mark a run as completed successfully. */
   completeRun(runId: string, latencyMs: number = 0, costCents: number = 0): void {
     const state = this.findStateByRun(runId);
-    if (!state) throw AppError.notFound(`Run ${runId}`);
+    if (!state) throw OpsError.notFound(`Run ${runId}`);
 
     const run = state.runs.find(r => r.runId === runId);
-    if (!run) throw AppError.notFound(`Run ${runId}`);
+    if (!run) throw OpsError.notFound(`Run ${runId}`);
 
     run.status = 'completed';
     run.updatedAt = Date.now();
@@ -149,10 +169,10 @@ export class SelfHealer {
   /** Mark a run as failed. Triggers recovery logic. */
   failRun(runId: string, error: string, latencyMs: number = 0, costCents: number = 0): RecoveryAction | null {
     const state = this.findStateByRun(runId);
-    if (!state) throw AppError.notFound(`Run ${runId}`);
+    if (!state) throw OpsError.notFound(`Run ${runId}`);
 
     const run = state.runs.find(r => r.runId === runId);
-    if (!run) throw AppError.notFound(`Run ${runId}`);
+    if (!run) throw OpsError.notFound(`Run ${runId}`);
 
     run.status = 'failed';
     run.updatedAt = Date.now();
@@ -211,7 +231,7 @@ export class SelfHealer {
   recoverStuckRun(runId: string): RecoveryAction {
     const stuck = this.detectStuckRuns();
     const match = stuck.find(s => s.runId === runId);
-    if (!match) throw AppError.invalid(`Run ${runId} is not stuck or not found`);
+    if (!match) throw OpsError.invalid(`Run ${runId} is not stuck or not found`);
 
     return this.failRun(runId, `Run stuck for ${match.stuckForMs}ms without update`)!;
   }
@@ -221,12 +241,12 @@ export class SelfHealer {
   /** Recover a failed run with retry backoff. Public entry point. */
   recoverRun(runId: string): RecoveryAction {
     const state = this.findStateByRun(runId);
-    if (!state) throw AppError.notFound(`Run ${runId}`);
+    if (!state) throw OpsError.notFound(`Run ${runId}`);
 
     const run = state.runs.find(r => r.runId === runId);
-    if (!run) throw AppError.notFound(`Run ${runId}`);
+    if (!run) throw OpsError.notFound(`Run ${runId}`);
     if (run.status !== 'failed') {
-      throw AppError.invalid(`Run ${runId} is not in failed state (current: ${run.status})`);
+      throw OpsError.invalid(`Run ${runId} is not in failed state (current: ${run.status})`);
     }
 
     const attempt = state.consecutiveFailures + 1;
@@ -286,7 +306,7 @@ export class SelfHealer {
   /** Explicitly resume a paused agent. */
   resumeAgent(agentId: string): RecoveryAction {
     const state = this.agents.get(agentId);
-    if (!state) throw AppError.notFound(`Agent ${agentId}`);
+    if (!state) throw OpsError.notFound(`Agent ${agentId}`);
 
     state.breaker.tripped = false;
     state.breaker.failures = 0;

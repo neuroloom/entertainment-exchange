@@ -122,6 +122,18 @@ export type {
   BusinessProfile,
 } from './rights/index.js';
 
+// Tokenized Rights module — L4 fractional ownership, rights tokenization, royalty distribution
+export { TokenizationEngine } from './tokenized-rights/index.js';
+export type {
+  RightsToken,
+  RoyaltyDistribution,
+  RoyaltyDistributionItem,
+  OwnershipSnapshot,
+  HolderHistoryEntry,
+  TokenTransfer,
+  TokenizationStores,
+} from './tokenized-rights/index.js';
+
 // Reputation module — composite scoring, cross-tenant benchmarks, fraud detection (L4 NETWORK EFFECTS)
 export { ReputationEngine, REPUTATION_TIER_THRESHOLDS } from './reputation/index.js';
 export type {
@@ -144,6 +156,33 @@ export type {
   FraudDetectorStores,
 } from './data-pipeline/index.js';
 
+// Compliance module — Moat 5: Compliance & Audit Automation
+export {
+  AuditReportGenerator,
+  COMPLIANCE_WEIGHTS,
+  RegulatoryEngine,
+  BUILT_IN_RULES,
+  RULE_DUAL_ENTRY_BALANCE,
+  RULE_REVENUE_RECOGNITION_TIMING,
+  RULE_IDEMPOTENCY,
+  RULE_SEGREGATION_OF_DUTIES,
+  RULE_RIGHTS_TRANSFER,
+} from './compliance/index.js';
+export type {
+  AuditReport,
+  AuditSection,
+  AuditFinding,
+  AuditEvent,
+  JournalLine,
+  RevenueEvent,
+  PassportTransferRecord,
+  AuditGeneratorStores,
+  ComplianceRule,
+  ComplianceCheckResult,
+  RegulatoryEngineStores,
+  CachedCheckResult,
+} from './compliance/index.js';
+
 // Ledger exports
 export {
   IdempotencyStore,
@@ -164,3 +203,22 @@ export type {
   RevenueRecipe,
   ScheduledRecognition,
 } from './ledger/index.js';
+
+// Protocol Mesh — Moat 10: Multi-Protocol Agent Mesh
+export { ProtocolRouter } from './protocol-mesh/index.js';
+export type {
+  ProtocolAdapter,
+  PaymentParams,
+  PaymentResult,
+  PaymentVerification,
+  RouteRecommendation,
+  ProtocolStatus,
+} from './protocol-mesh/index.js';
+
+// Cryptographic Audit — Moat 9: Immutable Cryptographic Audit Chain
+export { ChainVerifier } from './cryptographic-audit/index.js';
+export type {
+  HashChainEntry,
+  MerkleProof,
+  ComplianceProof,
+} from './cryptographic-audit/index.js';

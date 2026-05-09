@@ -2,8 +2,6 @@
 // Moat 4: 3-year competitive advantage through autonomous pricing intelligence
 // All calculations are deterministic and auditable. No external API dependencies.
 
-import { AppError } from '../../../shared/src/index.js';
-
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
 export interface PriceRecommendation {
