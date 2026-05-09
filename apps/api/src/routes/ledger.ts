@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
+import { paginate, paginatedResponse } from '../plugins/paginate.plugin.js';
 import {
   idempotencyStore,
   getRecipeForEvent,
@@ -126,6 +127,15 @@ export async function ledgerRoutes(app: FastifyInstance) {
 
     const body = PostJournalSchema.parse(req.body);
 
+    // Validate all accountIds reference existing accounts
+    seedDefaultAccounts(body.businessId, ctx.tenantId);
+    const accts = accounts.get(body.businessId) ?? [];
+    for (const entry of body.entries) {
+      if (!accts.some((a: any) => a.id === entry.accountId)) {
+        throw AppError.invalid(`Unknown account ID: ${entry.accountId}`);
+      }
+    }
+
     // Validate debits = credits
     const debits = body.entries.filter(e => e.direction === 'debit').reduce((s, e) => s + e.amountCents, 0);
     const credits = body.entries.filter(e => e.direction === 'credit').reduce((s, e) => s + e.amountCents, 0);
@@ -157,15 +167,11 @@ export async function ledgerRoutes(app: FastifyInstance) {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
     const businessId = (req.query as any)?.businessId;
+    const p = paginate(req.query);
     const all = journalStore.listJournals(ctx.tenantId, businessId);
-    const limit = parseInt((req.query as any)?.limit, 10) || 0;
-    const offset = parseInt((req.query as any)?.offset, 10) || 0;
-    if (limit > 0) {
-      const page = all.slice(offset, offset + limit);
-      reply.send({ data: page, total: all.length, limit, offset });
-    } else {
-      reply.send({ data: all });
-    }
+    const sliced = all.slice(p.offset, p.offset + p.limit);
+
+    reply.send(paginatedResponse(sliced, all.length, p));
   });
 
   app.get('/journals/:id', async (req, reply) => {
@@ -194,14 +200,9 @@ export async function ledgerRoutes(app: FastifyInstance) {
       filtered = journalStore.entries.filter(e => tenantJournalIds.has(e.journalId));
     }
 
-    const limit = parseInt((req.query as any)?.limit, 10) || 0;
-    const offset = parseInt((req.query as any)?.offset, 10) || 0;
-    if (limit > 0) {
-      const page = filtered.slice(offset, offset + limit);
-      reply.send({ data: page, total: filtered.length, limit, offset });
-    } else {
-      reply.send({ data: filtered });
-    }
+    const p = paginate(req.query);
+    const sliced = filtered.slice(p.offset, p.offset + p.limit);
+    reply.send(paginatedResponse(sliced, filtered.length, p));
   });
 
   app.get('/revenue', async (req, reply) => {

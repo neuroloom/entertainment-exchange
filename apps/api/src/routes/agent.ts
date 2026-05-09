@@ -30,7 +30,7 @@ const CreateRunSchema = z.object({
   goal: z.string().min(1),
 });
 
-const agents = new MemoryStore('agents');
+export const agents = new MemoryStore('agents');
 const agentRuns = new Map<string, any[]>();
 const auditEvents = new AuditStore();
 
@@ -164,6 +164,7 @@ export async function agentRoutes(app: FastifyInstance) {
 
     const agent = agents.get((req.params as any).id);
     if (!agent || agent.tenantId !== ctx.tenantId) throw AppError.notFound('Agent');
+    if (agent.status !== 'active') throw AppError.invalid('Agent is not active');
 
     const body = CreateRunSchema.parse(req.body);
     const runId = uuid();

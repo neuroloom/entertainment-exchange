@@ -421,7 +421,7 @@ describe('Agent routes', () => {
   // ── Run on inactive agent ────────────────────────────────────────────────
 
   describe('POST /api/v1/agents/:id/runs — inactive agent', () => {
-    it('succeeds on inactive agent (no status check in route)', async () => {
+    it('returns 400 when agent is not active', async () => {
       // Create an agent and then delete it (sets status=inactive)
       const createRes = await app.inject({
         method: 'POST',
@@ -445,9 +445,7 @@ describe('Agent routes', () => {
         headers: headers(TENANT_A, 'agent:run'),
         payload: { goal: 'Run on inactive agent' },
       });
-      // Known behavior: the route does not check agent.status,
-      // so creating a run on an inactive agent succeeds.
-      expect(res.statusCode).toBe(201);
+      expect(res.statusCode).toBe(400);
     });
   });
 });

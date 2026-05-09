@@ -7,7 +7,7 @@ import { v4 as uuid } from 'uuid';
 import { AppError } from '../plugins/errorHandler.js';
 import { assertBookingTransition, calculateQuote, BookingStateError, isTerminalState } from '@entertainment-exchange/orchestration';
 import type { BookingState } from '@entertainment-exchange/orchestration';
-import type { PaginatedResponse } from '@entertainment-exchange/shared';
+import { paginate, paginatedResponse } from '../plugins/paginate.plugin.js';
 import { MemoryStore, AuditStore, JournalStore } from '../services/repo.js';
 import { getBusinessAccountMap } from './business.js';
 
@@ -34,7 +34,21 @@ const PatchBookingStatusSchema = z.object({
   reason: z.string().optional(),
 });
 
-const bookings = new MemoryStore('bookings');
+const UpdateBookingSchema = z.object({
+  eventType: z.string().min(1).optional(),
+  eventName: z.string().optional(),
+  eventDate: z.string().optional(),
+  startTime: z.string().optional(),
+  endTime: z.string().optional(),
+  clientId: z.string().uuid().optional(),
+  artistId: z.string().uuid().optional(),
+  venueId: z.string().uuid().optional(),
+  quotedAmountCents: z.number().int().min(0).optional(),
+  source: z.string().optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
+
+export const bookings = new MemoryStore('bookings');
 const auditEvents = new AuditStore();
 export const journals = new JournalStore();
 
@@ -108,16 +122,11 @@ export async function bookingRoutes(app: FastifyInstance) {
     const ctx = (req as any).ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
 
-    const query = req.query as Record<string, string>;
-    const limit = query.limit ? parseInt(query.limit, 10) : 50;
-    const offset = query.offset ? parseInt(query.offset, 10) : 0;
-
+    const p = paginate(req.query);
     const all = bookings.all(ctx.tenantId);
-    const total = all.length;
-    const data = all.slice(offset, offset + limit);
+    const sliced = all.slice(p.offset, p.offset + p.limit);
 
-    const response: PaginatedResponse<typeof data[number]> = { data, total, limit, offset };
-    reply.send(response);
+    reply.send(paginatedResponse(sliced, all.length, p));
   });
 
   app.get('/bookings/:id', async (req, reply) => {
@@ -159,24 +168,25 @@ export async function bookingRoutes(app: FastifyInstance) {
       throw AppError.invalid(`Cannot update a booking in terminal "${booking.status}" state`);
     }
 
-    const body = req.body as Record<string, unknown>;
+    const body = UpdateBookingSchema.parse(req.body);
 
-    if ('eventType' in body && body.eventType !== undefined) booking.eventType = body.eventType;
-    if ('eventName' in body) booking.eventName = body.eventName ?? null;
-    if ('eventDate' in body && body.eventDate !== undefined) booking.eventDate = body.eventDate;
-    if ('startTime' in body && body.startTime !== undefined) booking.startTime = body.startTime;
-    if ('endTime' in body && body.endTime !== undefined) booking.endTime = body.endTime;
-    if ('clientId' in body) booking.clientId = body.clientId ?? null;
-    if ('artistId' in body) booking.artistId = body.artistId ?? null;
-    if ('venueId' in body) booking.venueId = body.venueId ?? null;
-    if ('quotedAmountCents' in body && body.quotedAmountCents !== undefined) booking.quotedAmountCents = body.quotedAmountCents;
-    if ('source' in body) booking.source = body.source ?? null;
-    if ('metadata' in body && body.metadata !== undefined) booking.metadata = body.metadata;
+    if (body.eventType !== undefined) booking.eventType = body.eventType;
+    if (body.eventName !== undefined) booking.eventName = body.eventName ?? null;
+    if (body.eventDate !== undefined) booking.eventDate = body.eventDate;
+    if (body.startTime !== undefined) booking.startTime = body.startTime;
+    if (body.endTime !== undefined) booking.endTime = body.endTime;
+    if (body.clientId !== undefined) booking.clientId = body.clientId ?? null;
+    if (body.artistId !== undefined) booking.artistId = body.artistId ?? null;
+    if (body.venueId !== undefined) booking.venueId = body.venueId ?? null;
+    if (body.quotedAmountCents !== undefined) booking.quotedAmountCents = body.quotedAmountCents;
+    if (body.source !== undefined) booking.source = body.source ?? null;
+    if (body.metadata !== undefined) booking.metadata = body.metadata;
 
     booking.updatedAt = new Date().toISOString();
     bookings.set(booking);
 
-    writeAudit(ctx, 'booking.update', 'booking', booking.id, booking.businessId, { changed: Object.keys(body) });
+    const changed = Object.keys(body).filter(k => (body as any)[k] !== undefined);
+    writeAudit(ctx, 'booking.update', 'booking', booking.id, booking.businessId, { changed });
     reply.send({ data: booking });
   });
 

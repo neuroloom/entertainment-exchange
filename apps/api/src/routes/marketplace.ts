@@ -55,8 +55,8 @@ const validDealTransitions: Record<string, string[]> = {
   escrow_funded: ['completed'],
 };
 
-const listings = new MemoryStore('listings');
-const deals = new Map<string, any[]>();
+export const listings = new MemoryStore('listings');
+export const deals = new Map<string, any[]>();
 const dealEngine = new DealRoomEngine();
 const auditEvents = new AuditStore();
 

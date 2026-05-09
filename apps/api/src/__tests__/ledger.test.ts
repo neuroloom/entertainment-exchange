@@ -15,8 +15,9 @@ afterAll(async () => {
 
 const TENANT = 'tenant-ledger';
 const BUSINESS_ID = 'bd111111-1111-1111-1111-111111111111';
-const ACCT_ASSET = 'ac000000-0000-0000-0000-000000000001';
-const ACCT_REVENUE = 'ac000000-0000-0000-0000-000000000002';
+
+let ACCT_ASSET: string;
+let ACCT_REVENUE: string;
 
 const HEADERS = {
   'x-tenant-id': TENANT,
@@ -24,6 +25,17 @@ const HEADERS = {
 };
 
 describe('POST /api/v1/ledger/journal', () => {
+  beforeAll(async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/ledger/accounts?businessId=${BUSINESS_ID}`,
+      headers: { 'x-tenant-id': TENANT },
+    });
+    const accts = JSON.parse(res.body).data;
+    ACCT_ASSET = accts.find((a: any) => a.code === '1000').id;
+    ACCT_REVENUE = accts.find((a: any) => a.code === '4000').id;
+  });
+
   it('returns 201 on a balanced journal entry', async () => {
     const res = await app.inject({
       method: 'POST',
@@ -562,24 +574,22 @@ describe('GET /api/v1/ledger/accounts/:id', () => {
 });
 
 describe('POST /api/v1/ledger/journal edge case: nonexistent account', () => {
-  it('accepts journal with nonexistent account IDs (no account validation)', async () => {
-    // The journal route does not validate that accountIds reference existing accounts.
-    // This is a known design choice — validation could be added in the future.
+  it('returns 400 when referencing unknown account', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/ledger/journal',
       headers: HEADERS,
       payload: {
         businessId: BUSINESS_ID,
-        memo: 'Journal with made-up account IDs',
         entries: [
-          { accountId: '00000000-0000-0000-0000-000000000099', direction: 'debit', amountCents: 3000 },
-          { accountId: '00000000-0000-0000-0000-000000000098', direction: 'credit', amountCents: 3000 },
+          { accountId: '00000000-0000-0000-0000-000000000099', direction: 'debit', amountCents: 1000 },
+          { accountId: ACCT_REVENUE, direction: 'credit', amountCents: 1000 },
         ],
       },
     });
 
-    expect(res.statusCode).toBe(201);
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.code).toBe('INVALID_INPUT');
   });
 });
 
