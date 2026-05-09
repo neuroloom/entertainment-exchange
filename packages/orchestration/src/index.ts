@@ -54,6 +54,7 @@ export {
   H_CACHE_HIT_RATE as NANO_H_CACHE_HIT_RATE,
   MUTATION_BETA_1_MAX_NORMAL,
   MARKET_DECISION_ACCURACY_TARGET, MARKET_VIRTUAL_ANALYSTS,
+  AutoOptimizer, recordMetrics, getLatestMetrics,
 } from './nano/index.js';
 export type {
   DNAStrand, EvolvableParams, VGDOResult, FitnessGrade,
@@ -62,6 +63,7 @@ export type {
   CheckpointEntry, CheckpointSummary, SessionSummary,
   MutationProtocol, ProtocolStats, MutationTrackingSummary,
   StabilityVerdict, EpochCallback,
+  OptimizationCycle, PerformanceSnapshot,
 } from './nano/index.js';
 
 // Negotiation module — Moat 7: Autonomous Deal Negotiation (3-year moat)
@@ -79,7 +81,7 @@ export type {
 // Marketplace exports (from neuroloom/velra + neuroloom/agent-exchange)
 export { AgentMarketplace, generateAgentReplies, EvidenceValidator, DealRoomEngine } from './marketplace/index.js';
 // Booking domain exports
-export { BOOKING_STATES, ALLOWED_TRANSITIONS, assertBookingTransition, isTerminalState, getNextStates, BookingStateError, calculateQuote } from './booking/index.js';
+export { BOOKING_STATES, ALLOWED_TRANSITIONS, assertBookingTransition, isTerminalState, getNextStates, BookingStateError, calculateQuote, BASE_RATES, ADDON_RATES, PER_GUEST_ADDONS, TRAVEL_RATE_PER_MILE, TRAVEL_FREE_MILES, MINIMUM_QUOTE_CENTS } from './booking/index.js';
 export type { BookingState, EventType, QuoteParams, QuoteBreakdown } from './booking/index.js';
 
 export type {

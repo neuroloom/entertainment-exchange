@@ -329,4 +329,91 @@ describe('Marketplace routes', () => {
       expect(res.statusCode).toBe(400);
     });
   });
+
+  // ── Edge cases: PATCH published listing, PATCH deal invalid transition, DELETE nonexistent ─
+
+  describe('PATCH /api/v1/marketplace/listings/:id — published listing', () => {
+    it('returns 400 when updating a published listing (not draft)', async () => {
+      // Create and publish a listing
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/marketplace/listings',
+        headers: headers(TENANT_A, 'listing:publish'),
+        payload: {
+          sellerBusinessId: SELLER_BUSINESS_ID,
+          listingType: 'agent',
+          title: 'Soon Published',
+        },
+      });
+      const listingId = JSON.parse(createRes.payload).data.id;
+
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/marketplace/listings/${listingId}/publish`,
+        headers: headers(TENANT_A, 'listing:publish'),
+      });
+
+      // Try to update the now-published listing
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/marketplace/listings/${listingId}`,
+        headers: headers(TENANT_A, 'listing:publish'),
+        payload: { title: 'Updated Published' },
+      });
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.payload);
+      expect(body.error.code).toBe('INVALID_INPUT');
+      expect(body.error.message).toContain('Only draft listings can be updated');
+    });
+  });
+
+  describe('PATCH /api/v1/marketplace/deals/:id — invalid transition', () => {
+    it('returns 400 for an invalid deal transition (created → completed)', async () => {
+      // Create a listing and deal
+      const listingRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/marketplace/listings',
+        headers: headers(TENANT_A, 'listing:publish'),
+        payload: {
+          sellerBusinessId: SELLER_BUSINESS_ID,
+          listingType: 'agent',
+          title: 'Deal Transition Test',
+        },
+      });
+      const lid = JSON.parse(listingRes.payload).data.id;
+
+      const dealRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/marketplace/deals',
+        headers: headers(TENANT_A, 'deal:close'),
+        payload: { listingId: lid, buyerUserId: BUYER_USER_ID },
+      });
+      const dealId = JSON.parse(dealRes.payload).data.id;
+
+      // created → completed is invalid (must go through negotiating → agreed → escrow_funded)
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/marketplace/deals/${dealId}`,
+        headers: headers(TENANT_A, 'deal:close'),
+        payload: { status: 'completed' },
+      });
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.payload);
+      expect(body.error.code).toBe('INVALID_INPUT');
+      expect(body.error.message).toContain('Cannot transition deal');
+    });
+  });
+
+  describe('DELETE /api/v1/marketplace/listings/:id — nonexistent listing', () => {
+    it('returns 404 for a nonexistent listing', async () => {
+      const res = await app.inject({
+        method: 'DELETE',
+        url: '/api/v1/marketplace/listings/00000000-0000-0000-0000-000000000000',
+        headers: headers(TENANT_A, 'listing:publish'),
+      });
+      expect(res.statusCode).toBe(404);
+      const body = JSON.parse(res.payload);
+      expect(body.error.code).toBe('NOT_FOUND');
+    });
+  });
 });

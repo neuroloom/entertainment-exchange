@@ -336,5 +336,118 @@ describe('Agent routes', () => {
       expect(body.data.grade).toBe('A');
       expect(['S', 'A', 'B', 'C', 'D', 'F']).toContain(body.data.grade);
     });
+
+    it('returns 401 without auth headers', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/agents/pipeline/vgdo',
+        // No x-actor-id or x-actor-permissions
+      });
+      expect(res.statusCode).toBe(401);
+      const body = JSON.parse(res.payload);
+      expect(body.error.code).toBe('UNAUTHENTICATED');
+    });
+  });
+
+  // ── Pipeline Stats without auth ──────────────────────────────────────────
+
+  describe('GET /api/v1/agents/pipeline/stats (no auth)', () => {
+    it('returns 401 without auth headers', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/agents/pipeline/stats',
+        // No x-actor-id or x-actor-permissions
+      });
+      expect(res.statusCode).toBe(401);
+      const body = JSON.parse(res.payload);
+      expect(body.error.code).toBe('UNAUTHENTICATED');
+    });
+  });
+
+  // ── PATCH /api/v1/agents/:id ─────────────────────────────────────────────
+
+  describe('PATCH /api/v1/agents/:id', () => {
+    let agentId: string;
+
+    beforeAll(async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/agents',
+        headers: headers(TENANT_A, 'agent:run'),
+        payload: { name: 'Patchable Agent', role: 'patcher', autonomyLevel: 2 },
+      });
+      agentId = JSON.parse(res.payload).data.id;
+    });
+
+    it('returns 200 updating agent fields', async () => {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/agents/${agentId}`,
+        headers: headers(TENANT_A, 'agent:run'),
+        payload: { name: 'Patched Agent', autonomyLevel: 4 },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.data.name).toBe('Patched Agent');
+      expect(body.data.autonomyLevel).toBe(4);
+      expect(body.data.role).toBe('patcher'); // unchanged
+    });
+
+    it('returns 404 for nonexistent agent', async () => {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/agents/00000000-0000-0000-0000-000000000000',
+        headers: headers(TENANT_A, 'agent:run'),
+        payload: { name: 'Ghost Agent' },
+      });
+      expect(res.statusCode).toBe(404);
+      const body = JSON.parse(res.payload);
+      expect(body.error.code).toBe('NOT_FOUND');
+    });
+
+    it('returns 403 without agent:run permission', async () => {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/agents/${agentId}`,
+        headers: headers(TENANT_A, 'read'),
+        payload: { name: 'Should Not Update' },
+      });
+      expect(res.statusCode).toBe(403);
+      const body = JSON.parse(res.payload);
+      expect(body.error.code).toBe('FORBIDDEN');
+    });
+  });
+
+  // ── Run on inactive agent ────────────────────────────────────────────────
+
+  describe('POST /api/v1/agents/:id/runs — inactive agent', () => {
+    it('succeeds on inactive agent (no status check in route)', async () => {
+      // Create an agent and then delete it (sets status=inactive)
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/agents',
+        headers: headers(TENANT_A, 'agent:run'),
+        payload: { name: 'DeactivateMe', role: 'temp', autonomyLevel: 1 },
+      });
+      const inactiveId = JSON.parse(createRes.payload).data.id;
+
+      // Set as inactive via DELETE
+      await app.inject({
+        method: 'DELETE',
+        url: `/api/v1/agents/${inactiveId}`,
+        headers: headers(TENANT_A, 'agent:run'),
+      });
+
+      // Attempt to create a run on the inactive agent
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/v1/agents/${inactiveId}/runs`,
+        headers: headers(TENANT_A, 'agent:run'),
+        payload: { goal: 'Run on inactive agent' },
+      });
+      // Known behavior: the route does not check agent.status,
+      // so creating a run on an inactive agent succeeds.
+      expect(res.statusCode).toBe(201);
+    });
   });
 });

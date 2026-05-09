@@ -88,6 +88,40 @@ describe('POST /api/v1/auth/register', () => {
     const body = JSON.parse(res.body);
     expect(body.error.code).toBe('VALIDATION_FAILED');
   });
+
+  it('returns 409 on duplicate email', async () => {
+    // Register first
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: { email: 'dupe@test.com', password: 'secure-test-pass-99' },
+    });
+
+    // Try to register again with same email
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: { email: 'dupe@test.com', password: 'another-secure-pass' },
+    });
+
+    expect(res.statusCode).toBe(409);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe('CONFLICT');
+    expect(body.error.message).toContain('Email already registered');
+  });
+
+  it('returns 400 on common password', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: { email: 'commonpw@test.com', password: 'password123' },
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe('INVALID_INPUT');
+    expect(body.error.message).toContain('Password is too common');
+  });
 });
 
 describe('POST /api/v1/auth/login', () => {
@@ -154,6 +188,82 @@ describe('POST /api/v1/auth/login', () => {
     expect(res.statusCode).toBe(400);
     const body = JSON.parse(res.body);
     expect(body.error.code).toBe('VALIDATION_FAILED');
+  });
+});
+
+describe('POST /api/v1/auth/refresh', () => {
+  let refreshToken: string;
+
+  beforeAll(async () => {
+    // Register and login to get a refresh token
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: { email: 'refresh@test.com', password: 'secure-test-pass-99' },
+    });
+    const loginRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: { email: 'refresh@test.com', password: 'secure-test-pass-99' },
+    });
+    refreshToken = JSON.parse(loginRes.body).data.refreshToken;
+  });
+
+  it('returns 200 with valid refresh token (rotates)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/refresh',
+      payload: { refreshToken },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.data).toHaveProperty('token');
+    expect(body.data).toHaveProperty('refreshToken');
+    // Token should be rotated (different from original)
+    expect(body.data.refreshToken).not.toBe(refreshToken);
+  });
+
+  it('returns 401 with expired/invalid refresh token', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/refresh',
+      payload: { refreshToken: 'expired-token-that-does-not-exist' },
+    });
+
+    expect(res.statusCode).toBe(401);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe('UNAUTHENTICATED');
+    expect(body.error.message).toContain('Invalid or expired refresh token');
+  });
+
+  it('returns 401 when reusing an already-consumed refresh token', async () => {
+    // Get a fresh refresh token
+    const loginRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: { email: 'refresh@test.com', password: 'secure-test-pass-99' },
+    });
+    const rt = JSON.parse(loginRes.body).data.refreshToken;
+
+    // Use it once (should succeed)
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/refresh',
+      payload: { refreshToken: rt },
+    });
+
+    // Try to reuse the same consumed token
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/refresh',
+      payload: { refreshToken: rt },
+    });
+
+    expect(res.statusCode).toBe(401);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe('UNAUTHENTICATED');
+    expect(body.error.message).toContain('Invalid or expired refresh token');
   });
 });
 

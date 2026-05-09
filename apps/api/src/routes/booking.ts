@@ -36,7 +36,7 @@ const PatchBookingStatusSchema = z.object({
 
 const bookings = new MemoryStore('bookings');
 const auditEvents = new AuditStore();
-const journals = new JournalStore();
+export const journals = new JournalStore();
 
 function writeAudit(ctx: any, action: string, resourceType: string, resourceId: string, businessId?: string, metadata?: Record<string, unknown>) {
   auditEvents.push({

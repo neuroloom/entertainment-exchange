@@ -357,3 +357,360 @@ describe('GET /api/v1/bookings/:id', () => {
     expect(body.error.code).toBe('NOT_FOUND');
   });
 });
+
+describe('POST /api/v1/bookings/:id/cancel', () => {
+  it('returns 200 cancelling an inquiry booking', async () => {
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings',
+      headers: BASE_HEADERS,
+      payload: validPayload(),
+    });
+    const bookingId = JSON.parse(createRes.body).data.id;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/bookings/${bookingId}/cancel`,
+      headers: BASE_HEADERS,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.data.status).toBe('cancelled');
+  });
+
+  it('returns 400 cancelling an already-cancelled booking', async () => {
+    // Create and cancel a booking
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings',
+      headers: BASE_HEADERS,
+      payload: validPayload(),
+    });
+    const bookingId = JSON.parse(createRes.body).data.id;
+
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/bookings/${bookingId}/cancel`,
+      headers: BASE_HEADERS,
+    });
+
+    // Try to cancel again
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/bookings/${bookingId}/cancel`,
+      headers: BASE_HEADERS,
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe('INVALID_INPUT');
+    expect(body.error.message).toContain('Cannot cancel a booking');
+  });
+
+  it('returns 400 cancelling a completed (terminal) booking', async () => {
+    // Create a booking and transition to completed
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings',
+      headers: BASE_HEADERS,
+      payload: validPayload(),
+    });
+    const bookingId = JSON.parse(createRes.body).data.id;
+
+    // Move to completed
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/bookings/${bookingId}/status`,
+      headers: BASE_HEADERS,
+      payload: { status: 'tentative' },
+    });
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/bookings/${bookingId}/status`,
+      headers: BASE_HEADERS,
+      payload: { status: 'confirmed' },
+    });
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/bookings/${bookingId}/status`,
+      headers: BASE_HEADERS,
+      payload: { status: 'contracted' },
+    });
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/bookings/${bookingId}/status`,
+      headers: BASE_HEADERS,
+      payload: { status: 'completed' },
+    });
+
+    // Try to cancel a completed booking
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/bookings/${bookingId}/cancel`,
+      headers: BASE_HEADERS,
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe('INVALID_INPUT');
+    expect(body.error.message).toContain('Cannot cancel a booking');
+  });
+
+  it('returns 403 without booking:confirm permission', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings/00000000-0000-0000-0000-000000000000/cancel',
+      headers: {
+        'x-tenant-id': TENANT,
+        'x-actor-permissions': 'booking:create',
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe('FORBIDDEN');
+    expect(body.error.message).toContain('booking:confirm');
+  });
+});
+
+describe('POST /api/v1/bookings/:id/cancel — reversal journal', () => {
+  const BIZ_ID = 'bd222222-2222-2222-2222-222222222222';
+  const REV_TENANT = 'tenant-rev';
+  const REV_HEADERS = {
+    'x-tenant-id': REV_TENANT,
+    'x-business-id': BIZ_ID,
+    'x-actor-permissions': 'booking:create,booking:confirm',
+  };
+
+  it('creates reversal journal when cancelling a confirmed booking', async () => {
+    // Create a booking with businessId and quotedAmountCents
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings',
+      headers: REV_HEADERS,
+      payload: validPayload({ quotedAmountCents: 150000 }),
+    });
+    const bookingId = JSON.parse(createRes.body).data.id;
+
+    // Transition to confirmed
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/bookings/${bookingId}/status`,
+      headers: REV_HEADERS,
+      payload: { status: 'tentative' },
+    });
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/bookings/${bookingId}/status`,
+      headers: REV_HEADERS,
+      payload: { status: 'confirmed' },
+    });
+
+    // Cancel the confirmed booking
+    const cancelRes = await app.inject({
+      method: 'POST',
+      url: `/api/v1/bookings/${bookingId}/cancel`,
+      headers: REV_HEADERS,
+    });
+
+    expect(cancelRes.statusCode).toBe(200);
+    const body = JSON.parse(cancelRes.body);
+    expect(body.data.status).toBe('cancelled');
+
+    // Verify the reversal journal was created
+    const { journals } = await import('../routes/booking.js');
+    const allJournals = journals.listJournals(REV_TENANT, BIZ_ID);
+    const reversal = allJournals.find((j: any) =>
+      j.referenceId === bookingId && j.memo.includes('reversal'),
+    );
+    expect(reversal).toBeDefined();
+    expect(reversal.memo).toContain('Cancel booking');
+    expect(reversal.memo).toContain('reversal');
+
+    // Verify journal entries: debit to deferred revenue (2000), credit to booking revenue (4000)
+    const entries = journals.getEntries(reversal.id);
+    expect(entries).toHaveLength(2);
+    expect(entries[0].direction).toBe('debit');
+    expect(entries[0].amountCents).toBe(150000);
+    expect(entries[1].direction).toBe('credit');
+    expect(entries[1].amountCents).toBe(150000);
+  });
+
+  it('creates reversal journal when cancelling a contracted booking', async () => {
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings',
+      headers: REV_HEADERS,
+      payload: validPayload({ quotedAmountCents: 200000 }),
+    });
+    const bookingId = JSON.parse(createRes.body).data.id;
+
+    // Transition through to contracted
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/bookings/${bookingId}/status`,
+      headers: REV_HEADERS,
+      payload: { status: 'tentative' },
+    });
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/bookings/${bookingId}/status`,
+      headers: REV_HEADERS,
+      payload: { status: 'confirmed' },
+    });
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/bookings/${bookingId}/status`,
+      headers: REV_HEADERS,
+      payload: { status: 'contracted' },
+    });
+
+    // Cancel the contracted booking
+    const cancelRes = await app.inject({
+      method: 'POST',
+      url: `/api/v1/bookings/${bookingId}/cancel`,
+      headers: REV_HEADERS,
+    });
+
+    expect(cancelRes.statusCode).toBe(200);
+    expect(JSON.parse(cancelRes.body).data.status).toBe('cancelled');
+
+    // Verify reversal journal entries with correct amounts
+    const { journals } = await import('../routes/booking.js');
+    const allJournals = journals.listJournals(REV_TENANT, BIZ_ID);
+    const reversal = allJournals.find((j: any) =>
+      j.referenceId === bookingId && j.memo.includes('reversal'),
+    );
+    expect(reversal).toBeDefined();
+
+    const entries = journals.getEntries(reversal.id);
+    expect(entries).toHaveLength(2);
+    expect(entries[0].amountCents).toBe(200000);
+    expect(entries[1].amountCents).toBe(200000);
+  });
+
+  it('does NOT create reversal journal when cancelling an inquiry booking', async () => {
+    // Create a fresh booking (inquiry status)
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings',
+      headers: REV_HEADERS,
+      payload: validPayload({ quotedAmountCents: 100000 }),
+    });
+    const bookingId = JSON.parse(createRes.body).data.id;
+
+    // Count existing reversal journals for this tenant/business
+    const { journals } = await import('../routes/booking.js');
+    const beforeCount = journals.listJournals(REV_TENANT, BIZ_ID).length;
+
+    // Cancel the inquiry booking (no reversal should be created)
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/bookings/${bookingId}/cancel`,
+      headers: REV_HEADERS,
+    });
+
+    const afterCount = journals.listJournals(REV_TENANT, BIZ_ID).length;
+    // No new journals should have been added for this booking cancellation
+    expect(afterCount).toBe(beforeCount);
+  });
+
+  it('does NOT create reversal when quotedAmountCents is null', async () => {
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings',
+      headers: REV_HEADERS,
+      payload: validPayload({ quotedAmountCents: undefined }),
+    });
+    const bookingId = JSON.parse(createRes.body).data.id;
+
+    // Transition to confirmed (no amount set)
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/bookings/${bookingId}/status`,
+      headers: REV_HEADERS,
+      payload: { status: 'tentative' },
+    });
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/bookings/${bookingId}/status`,
+      headers: REV_HEADERS,
+      payload: { status: 'confirmed' },
+    });
+
+    const { journals } = await import('../routes/booking.js');
+    const beforeCount = journals.listJournals(REV_TENANT, BIZ_ID).length;
+
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/bookings/${bookingId}/cancel`,
+      headers: REV_HEADERS,
+    });
+
+    const afterCount = journals.listJournals(REV_TENANT, BIZ_ID).length;
+    expect(afterCount).toBe(beforeCount);
+  });
+});
+
+describe('PUT /api/v1/bookings/:id', () => {
+  it('returns 200 with valid booking:create permission', async () => {
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings',
+      headers: BASE_HEADERS,
+      payload: validPayload(),
+    });
+    const bookingId = JSON.parse(createRes.body).data.id;
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/api/v1/bookings/${bookingId}`,
+      headers: BASE_HEADERS,
+      payload: { eventName: 'Updated Event Name' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.data.eventName).toBe('Updated Event Name');
+  });
+
+  it('returns 403 without booking:create permission', async () => {
+    // Create a booking
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings',
+      headers: BASE_HEADERS,
+      payload: validPayload(),
+    });
+    const bookingId = JSON.parse(createRes.body).data.id;
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/api/v1/bookings/${bookingId}`,
+      headers: {
+        'x-tenant-id': TENANT,
+        'x-actor-permissions': 'some:other',
+      },
+      payload: { eventName: 'Should Not Update' },
+    });
+
+    expect(res.statusCode).toBe(403);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe('FORBIDDEN');
+    expect(body.error.message).toContain('booking:create');
+  });
+
+  it('returns 404 for nonexistent booking', async () => {
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/bookings/00000000-0000-0000-0000-000000000000',
+      headers: BASE_HEADERS,
+      payload: { eventName: 'Ghost Update' },
+    });
+
+    expect(res.statusCode).toBe(404);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe('NOT_FOUND');
+  });
+});

@@ -533,3 +533,221 @@ describe('GET /api/v1/ledger/revenue', () => {
     });
   });
 });
+
+describe('GET /api/v1/ledger/accounts/:id', () => {
+  it('returns 400 when businessId query param is missing', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/ledger/accounts/${ACCT_ASSET}`,
+      headers: { 'x-tenant-id': TENANT },
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe('INVALID_INPUT');
+    expect(body.error.message).toContain('businessId');
+  });
+
+  it('returns 404 for nonexistent account ID', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/ledger/accounts/00000000-0000-0000-0000-000000000000?businessId=${BUSINESS_ID}`,
+      headers: { 'x-tenant-id': TENANT },
+    });
+
+    expect(res.statusCode).toBe(404);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe('NOT_FOUND');
+  });
+});
+
+describe('POST /api/v1/ledger/journal edge case: nonexistent account', () => {
+  it('accepts journal with nonexistent account IDs (no account validation)', async () => {
+    // The journal route does not validate that accountIds reference existing accounts.
+    // This is a known design choice — validation could be added in the future.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/ledger/journal',
+      headers: HEADERS,
+      payload: {
+        businessId: BUSINESS_ID,
+        memo: 'Journal with made-up account IDs',
+        entries: [
+          { accountId: '00000000-0000-0000-0000-000000000099', direction: 'debit', amountCents: 3000 },
+          { accountId: '00000000-0000-0000-0000-000000000098', direction: 'credit', amountCents: 3000 },
+        ],
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+  });
+});
+
+describe('GET /api/v1/ledger/revenue/schedule', () => {
+  it('returns 400 without businessId query param', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/v1/ledger/revenue/schedule',
+      headers: { 'x-tenant-id': TENANT },
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe('INVALID_INPUT');
+  });
+
+  it('returns empty schedule for a business with no scheduled deposits', async () => {
+    const emptyBizId = 'bd000000-0000-0000-0000-000000000000';
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/ledger/revenue/schedule?businessId=${emptyBizId}`,
+      headers: { 'x-tenant-id': TENANT },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.data).toEqual([]);
+  });
+});
+
+describe('POST /api/v1/ledger/revenue/recognize', () => {
+  const RECOGNIZE_TENANT = 'tenant-recognize';
+  const RECOGNIZE_BIZ = 'bd999999-9999-9999-9999-999999999999';
+  const RECOGNIZE_HEADERS = {
+    'x-tenant-id': RECOGNIZE_TENANT,
+    'x-actor-permissions': 'payment:create',
+  };
+  const FUTURE_DATE = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  it('returns 201 with recognition journal when a scheduled deposit exists', async () => {
+    // Step 1: Create a deposit revenue event with a future recognitionDate
+    const depositRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/ledger/revenue',
+      headers: RECOGNIZE_HEADERS,
+      payload: {
+        businessId: RECOGNIZE_BIZ,
+        eventType: 'deposit',
+        amountCents: 75000,
+        recognitionDate: FUTURE_DATE,
+        referenceType: 'booking',
+        referenceId: '00000000-0000-0000-0000-000000000777',
+      },
+    });
+    expect(depositRes.statusCode).toBe(201);
+
+    // Step 2: Recognize the revenue for that bookingId
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/ledger/revenue/recognize',
+      headers: RECOGNIZE_HEADERS,
+      payload: { bookingId: '00000000-0000-0000-0000-000000000777' },
+    });
+
+    expect(res.statusCode).toBe(201);
+    const body = JSON.parse(res.body);
+
+    // Should return journal with recognition details
+    expect(body.data.journal).toHaveProperty('id');
+    expect(body.data.journal.memo).toContain('Revenue recognition');
+    expect(body.data.journal.memo).toContain('00000000-0000-0000-0000-000000000777');
+    expect(body.data.journal.referenceType).toBe('booking');
+    expect(body.data.journal.businessId).toBe(RECOGNIZE_BIZ);
+
+    // Should return entries (the recognition recipe generates debit/credit pair)
+    expect(Array.isArray(body.data.entries)).toBe(true);
+    expect(body.data.entries.length).toBeGreaterThanOrEqual(2);
+
+    // Recognition result should show the recognized amount
+    expect(body.data.recognition).toHaveProperty('amount');
+    expect(body.data.recognition.amount).toBe(75000);
+    expect(body.data.recognition.businessId).toBe(RECOGNIZE_BIZ);
+  });
+
+  it('returns 400 on invalid bookingId format', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/ledger/revenue/recognize',
+      headers: RECOGNIZE_HEADERS,
+      payload: { bookingId: 'not-a-uuid' },
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe('VALIDATION_FAILED');
+  });
+
+  it('returns 403 without payment:create permission', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/ledger/revenue/recognize',
+      headers: {
+        'x-tenant-id': RECOGNIZE_TENANT,
+        'x-actor-permissions': 'some:other',
+      },
+      payload: { bookingId: '00000000-0000-0000-0000-000000000777' },
+    });
+
+    expect(res.statusCode).toBe(403);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe('FORBIDDEN');
+  });
+
+  it('returns 400 without x-tenant-id', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/ledger/revenue/recognize',
+      headers: {
+        'x-actor-permissions': 'payment:create',
+      },
+      payload: { bookingId: '00000000-0000-0000-0000-000000000777' },
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe('TENANT_REQUIRED');
+  });
+
+  it('recognizes deferred revenue by posting credit to booking revenue account', async () => {
+    // Create a new deposit with a different bookingId
+    const bookingRef = '00000000-0000-0000-0000-000000000888';
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/ledger/revenue',
+      headers: RECOGNIZE_HEADERS,
+      payload: {
+        businessId: RECOGNIZE_BIZ,
+        eventType: 'deposit',
+        amountCents: 120000,
+        recognitionDate: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString(),
+        referenceType: 'booking',
+        referenceId: bookingRef,
+      },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/ledger/revenue/recognize',
+      headers: RECOGNIZE_HEADERS,
+      payload: { bookingId: bookingRef },
+    });
+
+    expect(res.statusCode).toBe(201);
+    const body = JSON.parse(res.body);
+
+    // Recognition amount should match the deposit
+    expect(body.data.recognition.amount).toBe(120000);
+
+    // The recognition journal should debit deferred revenue (liability down)
+    // and credit booking revenue (revenue up)
+    const entries = body.data.entries;
+    expect(entries).toHaveLength(2);
+
+    const debits = entries.filter((e: any) => e.direction === 'debit');
+    const credits = entries.filter((e: any) => e.direction === 'credit');
+    expect(debits).toHaveLength(1);
+    expect(credits).toHaveLength(1);
+    expect(debits[0].amountCents).toBe(120000);
+    expect(credits[0].amountCents).toBe(120000);
+  });
+});

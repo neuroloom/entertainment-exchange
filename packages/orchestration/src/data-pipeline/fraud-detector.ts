@@ -2,7 +2,7 @@
 // Moat 3: Data network effects — detection thresholds tighten as more data flows
 // Scans booking values, document hashes, listing velocity, and metadata clones
 
-export interface FraudIndicator {
+export interface FraudDetectorIndicator {
   indicatorId: string;
   type: 'duplicate_document' | 'rapid_listing' | 'value_anomaly' | 'metadata_clone';
   confidence: number;
@@ -93,10 +93,10 @@ function buildGlobalMetaFingerprints(
 }
 
 function crossTenantFlags(
-  global: Map<string, CrossTenantEntry[]>, keyField: string, indicatorType: FraudIndicator['type'],
+  global: Map<string, CrossTenantEntry[]>, keyField: string, indicatorType: FraudDetectorIndicator['type'],
   baseConfidence: number, perTenant: number, entityExtractor: (e: CrossTenantEntry) => string,
-): FraudIndicator[] {
-  const out: FraudIndicator[] = [];
+): FraudDetectorIndicator[] {
+  const out: FraudDetectorIndicator[] = [];
   for (const [key, entries] of global) {
     const tenantSet = new Set(entries.map(e => e.tenantId));
     if (tenantSet.size > 1) {
