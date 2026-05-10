@@ -46,7 +46,7 @@ export const emailService = {
       async send(to: string, subject: string, _htmlBody: string) {
         try {
           const from = process.env.SMTP_FROM ?? 'noreply@entex.com';
-          await transporter.sendMail({ from, to, subject, html: htmlBody });
+          await transporter.sendMail({ from, to, subject, html: _htmlBody });
           return { success: true };
         } catch (err) {
           return { success: false, error: err instanceof Error ? err.message : 'Send failed' };
