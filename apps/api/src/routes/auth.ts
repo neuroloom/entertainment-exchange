@@ -50,7 +50,7 @@ async function hashPassword(password: string): Promise<string> {
 async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const [saltHex, hashHex] = stored.split(':');
   if (!saltHex || !hashHex) return false;
-  const salt = new Uint8Array(saltHex.match(/.{2}/g)!.map(b => parseInt(b, 16)));
+  const salt = new Uint8Array((saltHex.match(/.{2}/g) ?? []).map(b => parseInt(b, 16)));
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits(

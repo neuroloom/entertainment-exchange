@@ -996,10 +996,11 @@ export class ChainVerifier {
   }
 
   private getOrCreateChain(key: string): HashChainEntry[] {
-    if (!this.chains.has(key)) {
-      this.chains.set(key, []);
-    }
-    return this.chains.get(key)!;
+    const existing = this.chains.get(key);
+    if (existing) return existing;
+    const chain: HashChainEntry[] = [];
+    this.chains.set(key, chain);
+    return chain;
   }
 
   private getChain(journalId: string): HashChainEntry[] {
@@ -1007,9 +1008,10 @@ export class ChainVerifier {
   }
 
   private getOrCreateRoots(key: string): string[] {
-    if (!this.merkleRoots.has(key)) {
-      this.merkleRoots.set(key, []);
-    }
-    return this.merkleRoots.get(key)!;
+    const existing = this.merkleRoots.get(key);
+    if (existing) return existing;
+    const roots: string[] = [];
+    this.merkleRoots.set(key, roots);
+    return roots;
   }
 }

@@ -64,7 +64,7 @@ function getPipeline(): OutputMaximizer {
       ['rights-passport', 'legal anchor hash rights asset passport issuance chain of title'],
       ['source-of-truth', 'audit trail data consistency validation reconciliation'],
     ];
-    for (const [subtype, desc] of roles) maximizer!.router.registerSkill(subtype, desc);
+    for (const [subtype, desc] of roles) maximizer.router.registerSkill(subtype, desc);
 
     // Hook real Anthropic SDK as the model function
     maximizer.setModelFn(async (req: InferenceRequest) => {

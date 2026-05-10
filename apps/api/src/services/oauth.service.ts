@@ -68,6 +68,7 @@ export const oauthService = {
 
   createAuthUrl(provider: 'google' | 'github', redirectAfter?: string, tenantId?: string): { url: string; stateId: string } {
     const config = getConfig(provider);
+    if (!config) throw new Error(`OAuth config not found for provider: ${provider}. Call setConfig() first.`);
     const stateId = uuid();
     const now = new Date();
 
@@ -80,8 +81,8 @@ export const oauthService = {
     let url: string;
     if (provider === 'google') {
       const params = new URLSearchParams({
-        client_id: config!.clientId,
-        redirect_uri: config!.redirectUri,
+        client_id: config.clientId,
+        redirect_uri: config.redirectUri,
         response_type: 'code',
         scope: 'openid email profile',
         state: stateId,
@@ -89,8 +90,8 @@ export const oauthService = {
       url = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
     } else {
       const params = new URLSearchParams({
-        client_id: config!.clientId,
-        redirect_uri: config!.redirectUri,
+        client_id: config.clientId,
+        redirect_uri: config.redirectUri,
         scope: 'user:email',
         state: stateId,
       });

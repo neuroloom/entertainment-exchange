@@ -52,7 +52,7 @@ export const requestSigning = {
     const message = `${parts.t}.${payload}`;
     const encoder = new TextEncoder();
     const cryptoKey = await crypto.subtle.importKey('raw', encoder.encode(key.key), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
-    const sigBytes = new Uint8Array(parts.v1.match(/.{2}/g)!.map(b => parseInt(b, 16)));
+    const sigBytes = new Uint8Array((parts.v1.match(/.{2}/g) ?? []).map(b => parseInt(b, 16)));
     return crypto.subtle.verify('HMAC', cryptoKey, sigBytes, encoder.encode(message));
   },
 };
