@@ -88,9 +88,9 @@ describe('E2E Golden Path', () => {
     expect(acctsRes.statusCode).toBe(200);
     const accounts = JSON.parse(acctsRes.body).data;
     expect(accounts).toHaveLength(6);
-    cashAccountId = accounts.find((a: any) => a.code === '1000').id;
-    deferredAccountId = accounts.find((a: any) => a.code === '2000').id;
-    revenueAccountId = accounts.find((a: any) => a.code === '4000').id;
+    cashAccountId = accounts.find((a: { code: string; id: string }) => a.code === '1000').id;
+    deferredAccountId = accounts.find((a: { code: string; id: string }) => a.code === '2000').id;
+    revenueAccountId = accounts.find((a: { code: string; id: string }) => a.code === '4000').id;
     expect(cashAccountId).toBeDefined();
     expect(deferredAccountId).toBeDefined();
     expect(revenueAccountId).toBeDefined();
@@ -192,7 +192,7 @@ describe('E2E Golden Path', () => {
     // We posted at least 2 journals (manual deposit + revenue recognition)
     expect(journals.length).toBeGreaterThanOrEqual(2);
     // The deposit journal should be findable
-    const memos = journals.map((j: any) => j.memo);
+    const memos = journals.map((j: { memo: string }) => j.memo);
     expect(memos).toContain('E2E booking deposit — Stripe webhook');
 
     // ── 10. Verify booking is confirmed ────────────────────────────────────

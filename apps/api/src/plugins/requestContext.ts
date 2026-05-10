@@ -22,7 +22,7 @@ export interface RequestContext {
   businessId?: string;
   sanitized?: boolean;
   actor: {
-    type: 'human' | 'agent' | 'system' | 'provider';
+    type: 'human' | 'agent' | 'system' | 'provider' | 'api_key';
     id: string;
     userId?: string;
     roles: string[];

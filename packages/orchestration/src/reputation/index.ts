@@ -12,4 +12,6 @@ export type {
   ReputationScore,
   IndustryBenchmark,
   FraudIndicator,
+  TierBenefit,
+  CrossTenantTrustRecord,
 } from './reputation-engine.js';

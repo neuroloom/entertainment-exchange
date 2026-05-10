@@ -8,22 +8,6 @@ interface OAuthTokenResponse {
   refresh_token?: string;
 }
 
-interface GoogleProfileData {
-  id: string;
-  sub?: string;
-  email: string;
-  name?: string;
-  picture?: string;
-}
-
-interface GitHubProfileData {
-  id: number;
-  email: string | null;
-  login?: string;
-  name?: string;
-  avatar_url?: string;
-}
-
 interface GitHubEmailData {
   email: string;
   primary: boolean;

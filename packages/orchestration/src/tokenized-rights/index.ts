@@ -11,4 +11,8 @@ export type {
   HolderHistoryEntry,
   TokenTransfer,
   TokenizationStores,
+  TokenListing,
+  BuyoutOffer,
+  VoteTopic,
+  VoteBallot,
 } from './tokenization-engine.js';

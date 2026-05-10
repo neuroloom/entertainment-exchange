@@ -17,7 +17,7 @@ describe('sharedAudit', () => {
   it('filters by tenant ID', () => {
     writeAudit(ctx, 'test.update', 'test_entity', 'entity-2');
     const events = sharedAudit.all('test-tenant');
-    expect(events.every((e: any) => e.tenantId === 'test-tenant')).toBe(true);
+    expect(events.every((e: { tenantId: string }) => e.tenantId === 'test-tenant')).toBe(true);
   });
 
   it('includes metadata when provided', () => {

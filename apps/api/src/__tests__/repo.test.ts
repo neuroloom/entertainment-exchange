@@ -51,7 +51,7 @@ describe('MemoryStore', () => {
 
     const alpha = store.all('alpha');
     // Should only get items where tenantId === 'alpha'
-    const alphaIds = alpha.map((i: any) => i.id);
+    const alphaIds = alpha.map((i: { id: string }) => i.id);
     expect(alphaIds).toContain('a1');
     expect(alphaIds).toContain('a2');
     alphaIds.forEach((id: string) => expect(id).not.toBe('b1'));
@@ -65,13 +65,13 @@ describe('MemoryStore', () => {
     store.set({ id: 'find-1', type: 'alpha', tenantId: 't1' });
     store.set({ id: 'find-2', type: 'bravo', tenantId: 't1' });
 
-    const found = store.find((item: any) => item.type === 'bravo');
+    const found = store.find((item: { id: string; type: string }) => item.type === 'bravo');
     expect(found).toBeDefined();
     expect(found!.id).toBe('find-2');
   });
 
   it('find returns undefined when no match', () => {
-    const found = store.find((item: any) => item.type === 'charlie');
+    const found = store.find((item: { id: string; type: string }) => item.type === 'charlie');
     expect(found).toBeUndefined();
   });
 
@@ -117,13 +117,13 @@ describe('AuditStore', () => {
       metadata: {}, createdAt: new Date().toISOString(),
     });
     const t1Events = audit.all('t1');
-    t1Events.forEach((e: any) => expect(e.tenantId).toBe('t1'));
+    t1Events.forEach((e: { tenantId: string }) => expect(e.tenantId).toBe('t1'));
   });
 
   it('filter returns matching events by predicate', () => {
-    const results = audit.filter((e: any) => e.action === 'create');
+    const results = audit.filter((e: { action: string }) => e.action === 'create');
     expect(results.length).toBeGreaterThan(0);
-    results.forEach((e: any) => expect(e.action).toBe('create'));
+    results.forEach((e: { action: string }) => expect(e.action).toBe('create'));
   });
 
   it('find returns first event matching predicate', () => {
@@ -133,15 +133,15 @@ describe('AuditStore', () => {
   });
 
   it('find returns undefined when no match', () => {
-    expect(audit.find((e: any) => e.action === 'nonexistent')).toBeUndefined();
+    expect(audit.find((e: { action: string }) => e.action === 'nonexistent')).toBeUndefined();
   });
 
   it('some returns true when predicate matches', () => {
-    expect(audit.some((e: any) => e.tenantId === 't1')).toBe(true);
+    expect(audit.some((e: { tenantId: string }) => e.tenantId === 't1')).toBe(true);
   });
 
   it('some returns false when no predicate matches', () => {
-    expect(audit.some((e: any) => e.tenantId === 'nonexistent')).toBe(false);
+    expect(audit.some((e: { tenantId: string }) => e.tenantId === 'nonexistent')).toBe(false);
   });
 
   it('count returns total events for tenant', () => {
@@ -197,13 +197,13 @@ describe('JournalStore', () => {
   it('listJournals filters by tenantId', () => {
     const journals = store.listJournals('t1');
     expect(journals.length).toBeGreaterThanOrEqual(1);
-    journals.forEach((j: any) => expect(j.tenantId).toBe('t1'));
+    journals.forEach((j: { tenantId: string }) => expect(j.tenantId).toBe('t1'));
   });
 
   it('listJournals filters by tenantId and businessId', () => {
     const journals = store.listJournals('t1', 'b1');
     expect(journals.length).toBeGreaterThanOrEqual(1);
-    journals.forEach((j: any) => {
+    journals.forEach((j: { tenantId: string; businessId: string }) => {
       expect(j.tenantId).toBe('t1');
       expect(j.businessId).toBe('b1');
     });

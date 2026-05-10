@@ -172,8 +172,44 @@ function nowISO(): string {
 
 // ─── AutoNegotiator ────────────────────────────────────────────────────────────
 
+export interface ZOPA {
+  buyerFloor: number;        // buyer's BATNA ceiling
+  sellerCeiling: number;     // seller's BATNA floor
+  spread: number;            // ZOPA width in cents
+  exists: boolean;           // true if overlap
+  fairPrice: number;         // midpoint of the zone
+  confidence: number;        // 0-1, width / buyer max
+  comparableCount: number;   // # historical deals in reference set
+}
+
+export interface MultiPartyNegotiation {
+  sessionId: string;
+  listingId: string;
+  parties: Array<{
+    businessId: string;
+    role: 'buyer' | 'seller' | 'agent' | 'broker';
+    batna: { minPriceCents: number; maxPriceCents: number };
+    approvalThreshold: number; // max auto-approve price
+    autoApprove: boolean;
+  }>;
+  status: 'active' | 'accepted' | 'partial' | 'rejected';
+  rounds: NegotiationRound[];
+  approvals: Array<{ businessId: string; round: number; approved: boolean; timestamp: number }>;
+  startedAt: number;
+}
+
+interface ApprovalGate {
+  sessionId: string;
+  pendingRound: NegotiationRound;
+  approvers: string[];
+  approved: Set<string>;
+  status: 'pending' | 'approved' | 'rejected';
+}
+
 export class AutoNegotiator {
   private sessions = new Map<string, NegotiationSession>();
+  private multiPartySessions = new Map<string, MultiPartyNegotiation>();
+  private approvalGates = new Map<string, ApprovalGate>();
   private auditStore: MinimalAuditStore | null;
   private historicalDeals: DealPriceRecord[] = [];
   private defaultConstraints: Required<Omit<NegotiationConstraints, 'historicalPricesCents'>>;
@@ -813,6 +849,177 @@ export class AutoNegotiator {
     return Math.round(score * 10000) / 10000;
   }
 
+  // ── Public: compute the Zone of Possible Agreement (ZOPA) ─────────────────────
+
+  computeZOPA(
+    listingId: string,
+    buyerBusinessId: string,
+    opts?: NegotiationConstraints,
+  ): ZOPA {
+    const batna = this.calculateBATNA(listingId, buyerBusinessId, opts);
+    const spread = batna.buyer.maxPriceCents - batna.seller.minPriceCents;
+
+    return {
+      buyerFloor: batna.buyer.maxPriceCents,
+      sellerCeiling: batna.seller.minPriceCents,
+      spread,
+      exists: spread >= 0,
+      fairPrice: Math.round((batna.buyer.maxPriceCents + batna.seller.minPriceCents) / 2),
+      confidence: batna.buyer.maxPriceCents > 0 ? clamp(spread / batna.buyer.maxPriceCents, 0, 1) : 0,
+      comparableCount: this.historicalDeals.filter(
+        d => d.listingId === listingId || d.category === 'media',
+      ).length,
+    };
+  }
+
+  // ── Public: multi-party negotiation ────────────────────────────────────────────
+
+  startMultiPartyNegotiation(
+    listingId: string,
+    parties: Array<{
+      businessId: string;
+      role: 'buyer' | 'seller' | 'agent' | 'broker';
+      batnaOptions?: {
+        listingPriceCents?: number;
+        sellerCostCents?: number;
+        buyerDailyBudgetCents?: number;
+        sellerMinMarginPercent?: number;
+      };
+      approvalThreshold?: number;
+      autoApprove?: boolean;
+    }>,
+  ): MultiPartyNegotiation {
+    const sessionId = genId('mpn');
+    const startedAt = Date.now();
+
+    const resolvedParties = parties.map(p => {
+      let batna: { minPriceCents: number; maxPriceCents: number };
+      if (p.role === 'buyer' || p.role === 'agent') {
+        const b = this.calculateBATNA(listingId, p.businessId, p.batnaOptions);
+        batna = { minPriceCents: b.buyer.maxPriceCents, maxPriceCents: b.buyer.maxPriceCents };
+      } else {
+        const b = this.calculateBATNA(listingId, p.businessId, p.batnaOptions);
+        batna = { minPriceCents: b.seller.minPriceCents, maxPriceCents: b.seller.minPriceCents };
+      }
+
+      return {
+        businessId: p.businessId,
+        role: p.role,
+        batna,
+        approvalThreshold: p.approvalThreshold ?? batna.maxPriceCents,
+        autoApprove: p.autoApprove ?? false,
+      };
+    });
+
+    const session: MultiPartyNegotiation = {
+      sessionId,
+      listingId,
+      parties: resolvedParties,
+      status: 'active',
+      rounds: [],
+      approvals: [],
+      startedAt,
+    };
+
+    this.multiPartySessions.set(sessionId, session);
+    return JSON.parse(JSON.stringify(session));
+  }
+
+  runMultiPartyRound(
+    sessionId: string,
+    partyIndex: number,
+    offer: { priceCents: number; terms: DealTerms },
+  ): { round: NegotiationRound; needsApproval: boolean } {
+    const session = this.multiPartySessions.get(sessionId);
+    if (!session) throw new Error(`Multi-party session not found: ${sessionId}`);
+    if (session.status !== 'active') throw new Error(`Session ${sessionId} is ${session.status}`);
+    if (partyIndex < 0 || partyIndex >= session.parties.length) {
+      throw new Error(`Invalid party index: ${partyIndex}`);
+    }
+
+    const party = session.parties[partyIndex];
+    const roundNumber = session.rounds.length + 1;
+
+    // Check if approval is needed for this party
+    const needsApproval = !party.autoApprove || offer.priceCents > party.approvalThreshold;
+
+    const round: NegotiationRound = {
+      roundNumber,
+      offer: {
+        priceCents: offer.priceCents,
+        terms: { ...offer.terms },
+        fromParty: party.role === 'buyer' || party.role === 'agent' ? 'buyer' : 'seller',
+        timestamp: Date.now(),
+      },
+      status: needsApproval ? 'pending' : 'countered',
+    };
+
+    session.rounds.push(round);
+
+    // If approval is needed, create an approval gate
+    if (needsApproval) {
+      const otherParties = session.parties
+        .filter((_, i) => i !== partyIndex)
+        .map(p => p.businessId);
+
+      this.approvalGates.set(`${sessionId}:${roundNumber}`, {
+        sessionId,
+        pendingRound: round,
+        approvers: otherParties,
+        approved: new Set(),
+        status: 'pending',
+      });
+    }
+
+    return { round, needsApproval };
+  }
+
+  castApproval(
+    sessionId: string,
+    roundNumber: number,
+    approverBusinessId: string,
+    approved: boolean,
+  ): { round: NegotiationRound; allApproved: boolean; remaining: string[] } {
+    const gateKey = `${sessionId}:${roundNumber}`;
+    const gate = this.approvalGates.get(gateKey);
+    if (!gate) throw new Error(`Approval gate not found: ${gateKey}`);
+    if (gate.status !== 'pending') throw new Error(`Approval already ${gate.status}`);
+
+    const session = this.multiPartySessions.get(sessionId);
+    if (!session) throw new Error(`Session not found: ${sessionId}`);
+
+    // Record the approval
+    session.approvals.push({
+      businessId: approverBusinessId,
+      round: roundNumber,
+      approved,
+      timestamp: Date.now(),
+    });
+
+    if (!approved) {
+      gate.status = 'rejected';
+      gate.pendingRound.status = 'rejected';
+      session.status = 'rejected';
+      return { round: gate.pendingRound, allApproved: false, remaining: [] };
+    }
+
+    gate.approved.add(approverBusinessId);
+    const remaining = gate.approvers.filter(a => !gate.approved.has(a));
+
+    if (remaining.length === 0) {
+      gate.status = 'approved';
+      gate.pendingRound.status = 'countered';
+      return { round: gate.pendingRound, allApproved: true, remaining: [] };
+    }
+
+    return { round: gate.pendingRound, allApproved: false, remaining };
+  }
+
+  getMultiPartySession(sessionId: string): MultiPartyNegotiation | undefined {
+    const s = this.multiPartySessions.get(sessionId);
+    return s ? JSON.parse(JSON.stringify(s)) : undefined;
+  }
+
   // ── Private: merge terms between buyer and seller preferences ────────────────
 
   private mergeTerms(buyerTerms: DealTerms, sellerTerms: DealTerms, rng: () => number): DealTerms {
@@ -864,7 +1071,7 @@ export class AutoNegotiator {
   }
 
   private cloneSession(s: NegotiationSession): NegotiationSession {
-    return JSON.parse(JSON.stringify(s));
+    return structuredClone(s);
   }
 
   private cloneRound(r: NegotiationRound): NegotiationRound {

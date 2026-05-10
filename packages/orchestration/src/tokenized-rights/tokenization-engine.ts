@@ -60,6 +60,53 @@ export interface HolderHistoryEntry {
   distributions: number[]; // distribution amounts in cents, chronologically
 }
 
+// ─── Secondary Market Types ──────────────────────────────────────────────────────
+
+export interface TokenListing {
+  listingId: string;
+  tokenId: string;
+  sellerBusinessId: string;
+  basisPoints: number;
+  askingPriceCents: number;
+  listedAt: number;
+  expiresAt?: number;
+  status: 'active' | 'filled' | 'cancelled' | 'expired';
+  minPurchaseBasisPoints?: number;
+}
+
+export interface BuyoutOffer {
+  offerId: string;
+  tokenId: string;
+  buyerBusinessId: string;
+  basisPoints: number;
+  offerPriceCents: number;
+  offeredAt: number;
+  expiresAt: number;
+  status: 'pending' | 'accepted' | 'rejected' | 'expired' | 'countered';
+  counterOfferPriceCents?: number;
+  message?: string;
+}
+
+export interface VoteTopic {
+  topicId: string;
+  rightsAssetId: string;
+  title: string;
+  description: string;
+  options: string[];
+  closesAt: number;
+  status: 'open' | 'closed';
+}
+
+export interface VoteBallot {
+  ballotId: string;
+  topicId: string;
+  tokenId: string;
+  voterBusinessId: string;
+  optionIndex: number;
+  basisPoints: number;
+  castAt: number;
+}
+
 // ─── Chain-of-Title Transfer Record ──────────────────────────────────────────────
 
 export interface TokenTransfer {
@@ -635,5 +682,258 @@ export class TokenizationEngine {
     }
 
     return violations;
+  }
+
+  // ── Secondary Market: List tokens for sale ─────────────────────────────────────
+
+  listForSale(
+    tokenId: string,
+    sellerBusinessId: string,
+    basisPoints: number,
+    askingPriceCents: number,
+    expiresAt?: number,
+  ): TokenListing {
+    assertBasisPoints(basisPoints, 'listing basisPoints');
+    assertPositiveInteger(askingPriceCents, 'askingPriceCents');
+
+    const token = this.#getActiveToken(tokenId, sellerBusinessId);
+    if (basisPoints > token.ownershipBasisPoints) {
+      throw new Error(
+        `Cannot list ${basisPoints} bp: token only has ${token.ownershipBasisPoints} bp`,
+      );
+    }
+
+    const listing: TokenListing = {
+      listingId: crypto.randomUUID(),
+      tokenId,
+      sellerBusinessId,
+      basisPoints,
+      askingPriceCents,
+      listedAt: Date.now(),
+      expiresAt,
+      status: 'active',
+    };
+    this.#listings().set(listing.listingId, listing);
+    return listing;
+  }
+
+  cancelListing(listingId: string, businessId: string): TokenListing {
+    const listing = this.#getListing(listingId, businessId);
+    if (listing.status !== 'active') {
+      throw new Error(`Listing ${listingId} is ${listing.status}`);
+    }
+    listing.status = 'cancelled';
+    return listing;
+  }
+
+  getActiveListings(rightsAssetId?: string): TokenListing[] {
+    const all = [...this.#listings().values()].filter(l => l.status === 'active');
+    if (!rightsAssetId) return all;
+    return all.filter(l => {
+      const token = this.stores.tokens.get(l.tokenId);
+      return token?.rightsAssetId === rightsAssetId;
+    });
+  }
+
+  // ── Buyout Offers ────────────────────────────────────────────────────────────
+
+  makeOffer(
+    tokenId: string,
+    buyerBusinessId: string,
+    basisPoints: number,
+    offerPriceCents: number,
+    expiresAt: number,
+    message?: string,
+  ): BuyoutOffer {
+    assertBasisPoints(basisPoints, 'offer basisPoints');
+    assertPositiveInteger(offerPriceCents, 'offerPriceCents');
+
+    const token = this.stores.tokens.get(tokenId);
+    if (!token) throw new Error(`Token not found: ${tokenId}`);
+    if (token.status !== 'active') throw new Error(`Token ${tokenId} is not active`);
+    if (token.ownerBusinessId === buyerBusinessId) {
+      throw new Error('Cannot make offer on your own token');
+    }
+    if (basisPoints > token.ownershipBasisPoints) {
+      throw new Error(`Offer bp ${basisPoints} exceeds token bp ${token.ownershipBasisPoints}`);
+    }
+
+    const offer: BuyoutOffer = {
+      offerId: crypto.randomUUID(),
+      tokenId,
+      buyerBusinessId,
+      basisPoints,
+      offerPriceCents,
+      offeredAt: Date.now(),
+      expiresAt,
+      status: 'pending',
+      message,
+    };
+    this.#offers().set(offer.offerId, offer);
+    return offer;
+  }
+
+  respondToOffer(
+    offerId: string,
+    responderBusinessId: string,
+    action: 'accept' | 'reject' | 'counter',
+    counterPriceCents?: number,
+  ): BuyoutOffer {
+    const offer = this.#offers().get(offerId);
+    if (!offer) throw new Error(`Offer not found: ${offerId}`);
+    if (offer.status !== 'pending') throw new Error(`Offer ${offerId} is ${offer.status}`);
+
+    const token = this.stores.tokens.get(offer.tokenId);
+    if (!token || token.ownerBusinessId !== responderBusinessId) {
+      throw new Error('Only the token owner can respond to offers');
+    }
+
+    if (action === 'accept') {
+      offer.status = 'accepted';
+      this.transferTokens(offer.tokenId, responderBusinessId, offer.buyerBusinessId, offer.basisPoints, offer.offerPriceCents);
+    } else if (action === 'counter') {
+      if (!counterPriceCents) throw new Error('counterPriceCents required for counter-offer');
+      offer.status = 'countered';
+      offer.counterOfferPriceCents = counterPriceCents;
+    } else {
+      offer.status = 'rejected';
+    }
+    return offer;
+  }
+
+  // ── Token Merge: Consolidate small tokens ─────────────────────────────────────
+
+  mergeTokens(tokenIds: string[], ownerBusinessId: string): RightsToken {
+    if (tokenIds.length < 2) throw new Error('Need at least 2 tokens to merge');
+
+    const tokens = tokenIds.map(id => this.#getActiveToken(id, ownerBusinessId));
+    const assetId = tokens[0].rightsAssetId;
+    const passportId = tokens[0].passportId;
+
+    if (tokens.some(t => t.rightsAssetId !== assetId)) {
+      throw new Error('All tokens must be for the same rights asset');
+    }
+
+    const totalBp = tokens.reduce((s, t) => s + t.ownershipBasisPoints, 0);
+    const earliestAcquired = Math.min(...tokens.map(t => t.acquiredAt));
+
+    // Redeem source tokens
+    tokens.forEach(t => { t.status = 'redeemed'; t.ownershipBasisPoints = 0; });
+
+    // Mint merged token
+    const merged: RightsToken = {
+      tokenId: crypto.randomUUID(),
+      rightsAssetId: assetId,
+      passportId,
+      ownerBusinessId,
+      ownershipBasisPoints: totalBp,
+      acquiredAt: earliestAcquired,
+      acquisitionPriceCents: tokens.reduce((s, t) => s + t.acquisitionPriceCents, 0),
+      transferRestrictions: { rightOfFirstRefusal: false, minHoldingPeriodDays: 0 },
+      status: 'active',
+    };
+
+    this.stores.tokens.set(merged.tokenId, merged);
+    return merged;
+  }
+
+  // ── Voting Rights: Proportional governance by basis points ────────────────────
+
+  createVote(topic: Omit<VoteTopic, 'topicId' | 'status'>): VoteTopic {
+    const vt: VoteTopic = { ...topic, topicId: crypto.randomUUID(), status: 'open' };
+    this.#voteTopics().set(vt.topicId, vt);
+    return vt;
+  }
+
+  castVote(topicId: string, tokenId: string, voterBusinessId: string, optionIndex: number): VoteBallot {
+    const topic = this.#voteTopics().get(topicId);
+    if (!topic) throw new Error(`Vote topic not found: ${topicId}`);
+    if (topic.status !== 'open') throw new Error('Voting is closed');
+    if (optionIndex < 0 || optionIndex >= topic.options.length) {
+      throw new Error(`Invalid option index: ${optionIndex}`);
+    }
+
+    const token = this.#getActiveToken(tokenId, voterBusinessId);
+    if (token.rightsAssetId !== topic.rightsAssetId) {
+      throw new Error('Token does not belong to this rights asset');
+    }
+
+    // One vote per token per topic
+    const existing = [...this.#ballots().values()].find(b => b.topicId === topicId && b.tokenId === tokenId);
+    if (existing) throw new Error('Token has already voted on this topic');
+
+    const ballot: VoteBallot = {
+      ballotId: crypto.randomUUID(),
+      topicId, tokenId, voterBusinessId, optionIndex,
+      basisPoints: token.ownershipBasisPoints,
+      castAt: Date.now(),
+    };
+    this.#ballots().set(ballot.ballotId, ballot);
+    return ballot;
+  }
+
+  tallyVotes(topicId: string): Array<{ option: string; votes: number; basisPoints: number }> {
+    const topic = this.#voteTopics().get(topicId);
+    if (!topic) throw new Error(`Vote topic not found: ${topicId}`);
+
+    const ballots = [...this.#ballots().values()].filter(b => b.topicId === topicId);
+    return topic.options.map((opt, i) => ({
+      option: opt,
+      votes: ballots.filter(b => b.optionIndex === i).length,
+      basisPoints: ballots.filter(b => b.optionIndex === i).reduce((s, b) => s + b.basisPoints, 0),
+    }));
+  }
+
+  closeVote(topicId: string): { topic: VoteTopic; results: Array<{ option: string; votes: number; basisPoints: number }> } {
+    const topic = this.#voteTopics().get(topicId);
+    if (!topic) throw new Error(`Vote topic not found: ${topicId}`);
+    topic.status = 'closed';
+    return { topic, results: this.tallyVotes(topicId) };
+  }
+
+  // ── Private helpers ─────────────────────────────────────────────────────────────
+
+  #getActiveToken(tokenId: string, ownerBusinessId: string): RightsToken {
+    const token = this.stores.tokens.get(tokenId);
+    if (!token) throw new Error(`Token not found: ${tokenId}`);
+    if (token.status !== 'active') throw new Error(`Token ${tokenId} is not active`);
+    if (token.ownerBusinessId !== ownerBusinessId) {
+      throw new Error(`Token ${tokenId} owned by ${token.ownerBusinessId}, not ${ownerBusinessId}`);
+    }
+    return token;
+  }
+
+  #getListing(listingId: string, businessId: string): TokenListing {
+    const listing = this.#listings().get(listingId);
+    if (!listing) throw new Error(`Listing not found: ${listingId}`);
+    if (listing.sellerBusinessId !== businessId) {
+      throw new Error(`Listing ${listingId} belongs to ${listing.sellerBusinessId}`);
+    }
+    return listing;
+  }
+
+  #listings(): Map<string, TokenListing> {
+    return this.#lazyMap('__listings');
+  }
+
+  #offers(): Map<string, BuyoutOffer> {
+    return this.#lazyMap('__offers');
+  }
+
+  #voteTopics(): Map<string, VoteTopic> {
+    return this.#lazyMap('__vote_topics');
+  }
+
+  #ballots(): Map<string, VoteBallot> {
+    return this.#lazyMap('__ballots');
+  }
+
+  #lazyMap<T>(key: string): Map<string, T> {
+    const stores = this.stores as unknown as Record<string, unknown>;
+    const existing = stores[key] as Map<string, T> | undefined;
+    if (existing) return existing;
+    const m = new Map<string, T>();
+    stores[key] = m;
+    return m;
   }
 }

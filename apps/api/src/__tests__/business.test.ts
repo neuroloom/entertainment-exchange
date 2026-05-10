@@ -143,7 +143,7 @@ describe('GET /api/v1/businesses', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    const names = body.data.map((b: any) => b.name);
+    const names = body.data.map((b: { name: string }) => b.name);
     expect(names).toContain('Tenant A Biz');
     // Should NOT include tenant-b's business
     names.forEach((n: string) => expect(n).not.toBe('Tenant B Biz'));
@@ -460,8 +460,8 @@ describe('GET /api/v1/businesses/:id/metrics — wiring verification', () => {
       headers: { 'x-tenant-id': WIRE_TENANT },
     });
     const accts = JSON.parse(acctRes.body).data;
-    const bookingRevId = accts.find((a: any) => a.code === '4000').id;
-    const deferredRevId = accts.find((a: any) => a.code === '2000').id;
+    const bookingRevId = accts.find((a: { code: string; id: string }) => a.code === '4000').id;
+    const deferredRevId = accts.find((a: { code: string; id: string }) => a.code === '2000').id;
 
     // Post a journal entry that credits booking revenue (revenue increases with credit)
     await app.inject({
@@ -506,8 +506,8 @@ describe('GET /api/v1/businesses/:id/metrics — wiring verification', () => {
       headers: { 'x-tenant-id': WIRE_TENANT },
     });
     const accts = JSON.parse(acctRes.body).data;
-    const cashId = accts.find((a: any) => a.code === '1000').id;
-    const deferredRevId = accts.find((a: any) => a.code === '2000').id;
+    const cashId = accts.find((a: { code: string; id: string }) => a.code === '1000').id;
+    const deferredRevId = accts.find((a: { code: string; id: string }) => a.code === '2000').id;
 
     // Post a deposit journal: debit cash, credit deferred revenue
     // Credit to deferred revenue (2000) = positive deferred revenue
@@ -554,9 +554,9 @@ describe('GET /api/v1/businesses/:id/metrics — wiring verification', () => {
       headers: { 'x-tenant-id': WIRE_TENANT },
     });
     const accts = JSON.parse(acctRes.body).data;
-    const bookingRevId = accts.find((a: any) => a.code === '4000').id;
-    const deferredRevId = accts.find((a: any) => a.code === '2000').id;
-    const providerFeesId = accts.find((a: any) => a.code === '5000').id;
+    const bookingRevId = accts.find((a: { code: string; id: string }) => a.code === '4000').id;
+    const deferredRevId = accts.find((a: { code: string; id: string }) => a.code === '2000').id;
+    const providerFeesId = accts.find((a: { code: string; id: string }) => a.code === '5000').id;
 
     // Post revenue recognition: credit booking revenue (revenue +)
     await app.inject({

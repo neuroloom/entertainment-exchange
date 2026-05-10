@@ -32,8 +32,8 @@ describe('POST /api/v1/ledger/journal', () => {
       headers: { 'x-tenant-id': TENANT },
     });
     const accts = JSON.parse(res.body).data;
-    ACCT_ASSET = accts.find((a: any) => a.code === '1000').id;
-    ACCT_REVENUE = accts.find((a: any) => a.code === '4000').id;
+    ACCT_ASSET = accts.find((a: { code: string; id: string }) => a.code === '1000')!.id;
+    ACCT_REVENUE = accts.find((a: { code: string; id: string }) => a.code === '4000')!.id;
   });
 
   it('returns 201 on a balanced journal entry', async () => {
@@ -224,7 +224,7 @@ describe('GET /api/v1/ledger/accounts', () => {
     expect(body.data[4]).toMatchObject({ code: '4100', name: 'Commission Revenue', accountType: 'revenue' });
     expect(body.data[5]).toMatchObject({ code: '5000', name: 'Provider Fees', accountType: 'expense' });
     // Each account has required fields
-    body.data.forEach((a: any) => {
+    body.data.forEach((a: Record<string, unknown>) => {
       expect(a).toHaveProperty('id');
       expect(a).toHaveProperty('tenantId', TENANT);
       expect(a).toHaveProperty('businessId', BUSINESS_ID);
@@ -299,7 +299,7 @@ describe('GET /api/v1/ledger/journals', () => {
     const body = JSON.parse(res.body);
     expect(Array.isArray(body.data)).toBe(true);
     expect(body.data.length).toBeGreaterThan(0);
-    const memos = body.data.map((j: any) => j.memo);
+    const memos = body.data.map((j: { memo: string }) => j.memo);
     expect(memos).toContain('List test journal');
   });
 
@@ -313,7 +313,7 @@ describe('GET /api/v1/ledger/journals', () => {
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(body.data.length).toBeGreaterThan(0);
-    body.data.forEach((j: any) => {
+    body.data.forEach((j: Record<string, unknown>) => {
       expect(j.businessId).toBe(BUSINESS_ID);
     });
   });
@@ -527,7 +527,7 @@ describe('GET /api/v1/ledger/revenue', () => {
     const body = JSON.parse(res.body);
     expect(Array.isArray(body.data)).toBe(true);
     expect(body.data.length).toBeGreaterThan(0);
-    const types = body.data.map((e: any) => e.eventType);
+    const types = body.data.map((e: { eventType: string }) => e.eventType);
     expect(types).toContain('deposit');
   });
 
@@ -540,7 +540,7 @@ describe('GET /api/v1/ledger/revenue', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    body.data.forEach((e: any) => {
+    body.data.forEach((e: Record<string, unknown>) => {
       expect(e.businessId).toBe(BUSINESS_ID);
     });
   });
@@ -753,8 +753,8 @@ describe('POST /api/v1/ledger/revenue/recognize', () => {
     const entries = body.data.entries;
     expect(entries).toHaveLength(2);
 
-    const debits = entries.filter((e: any) => e.direction === 'debit');
-    const credits = entries.filter((e: any) => e.direction === 'credit');
+    const debits = entries.filter((e: { direction: string }) => e.direction === 'debit');
+    const credits = entries.filter((e: { direction: string }) => e.direction === 'credit');
     expect(debits).toHaveLength(1);
     expect(credits).toHaveLength(1);
     expect(debits[0].amountCents).toBe(120000);

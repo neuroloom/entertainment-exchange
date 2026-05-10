@@ -102,7 +102,7 @@ export class BatchProcessor<TIn = string, TOut = unknown> {
       const results = await this.processFn(batch.map(i => i.payload));
       batch.forEach((item, i) => item.resolve(results[i]));
     } catch (err) {
-      batch.forEach(item => item.reject(err as Error));
+      batch.forEach(item => item.reject(err instanceof Error ? err : new Error(String(err))));
     }
   }
 

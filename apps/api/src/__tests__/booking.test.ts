@@ -289,7 +289,7 @@ describe('GET /api/v1/bookings', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    const names = body.data.map((b: any) => b.eventName);
+    const names = body.data.map((b: { eventName: string }) => b.eventName);
     // Should not include the other tenant's booking
     names.forEach((n: string) => expect(n).not.toBe('Other Tenant Event'));
   });
@@ -521,8 +521,8 @@ describe('POST /api/v1/bookings/:id/cancel — reversal journal', () => {
     // Verify the reversal journal was created
     const { journals } = await import('../routes/booking.js');
     const allJournals = journals.listJournals(REV_TENANT, BIZ_ID);
-    const reversal = allJournals.find((j: any) =>
-      j.referenceId === bookingId && j.memo.includes('reversal'),
+    const reversal = allJournals.find((j: { referenceId: string | null; memo: string | null }) =>
+      j.referenceId === bookingId && j.memo?.includes('reversal'),
     );
     expect(reversal).toBeDefined();
     expect(reversal!.memo).toContain('Cancel booking');
@@ -579,8 +579,8 @@ describe('POST /api/v1/bookings/:id/cancel — reversal journal', () => {
     // Verify reversal journal entries with correct amounts
     const { journals } = await import('../routes/booking.js');
     const allJournals = journals.listJournals(REV_TENANT, BIZ_ID);
-    const reversal = allJournals.find((j: any) =>
-      j.referenceId === bookingId && j.memo.includes('reversal'),
+    const reversal = allJournals.find((j: { referenceId: string | null; memo: string | null }) =>
+      j.referenceId === bookingId && j.memo?.includes('reversal'),
     );
     expect(reversal).toBeDefined();
 

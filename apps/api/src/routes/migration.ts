@@ -12,7 +12,6 @@ import type { Agent } from './agent.js';
 import { listings } from './marketplace.js';
 import type { Listing } from './marketplace.js';
 
-type Params = { id: string };
 type CreateBody = { targetTenantId: string; domains: string[] };
 
 export async function migrationRoutes(app: FastifyInstance) {

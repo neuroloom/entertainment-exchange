@@ -14,6 +14,7 @@ interface Circuit {
   failures: number;
   successes: number;
   lastFailureAt?: string;
+  lastError?: string;
   lastStateChangeAt: string;
   openedAt?: string;
 }
@@ -68,6 +69,7 @@ export const circuitBreaker = {
     } catch (err) {
       c.failures++;
       c.lastFailureAt = new Date().toISOString();
+      c.lastError = err instanceof Error ? err.message : String(err);
 
       if (c.failures >= c.config.failureThreshold) {
         c.state = 'open';

@@ -7,4 +7,6 @@ export type {
   HashChainEntry,
   MerkleProof,
   ComplianceProof,
+  TamperLogEntry,
+  TimeRangeProof,
 } from './chain-verifier.js';

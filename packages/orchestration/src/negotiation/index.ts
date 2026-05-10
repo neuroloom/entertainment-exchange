@@ -7,4 +7,6 @@ export type {
   NegotiationResult,
   NegotiationConstraints,
   DealPriceRecord,
+  ZOPA,
+  MultiPartyNegotiation,
 } from './auto-negotiator.js';
