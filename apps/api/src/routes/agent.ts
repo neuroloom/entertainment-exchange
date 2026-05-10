@@ -45,7 +45,30 @@ export interface Agent {
 }
 
 export const agents = new MemoryStore<Agent>('agents');
-const agentRuns = new Map<string, any[]>();
+
+interface AgentRun {
+  id: string;
+  tenantId: string;
+  businessId?: string;
+  agentId: string;
+  status: string;
+  goal: string;
+  costCents: number;
+  output: {
+    result: string;
+    tokensIn: number;
+    tokensOut: number;
+    modelUsed: string;
+    cached: boolean;
+    omegaQuality: number;
+    vgdoGrade: string;
+    latencyMs: number;
+  };
+  startedAt: string;
+  endedAt: string;
+}
+
+const agentRuns = new Map<string, AgentRun[]>();
 
 
 import { writeAudit } from '../services/audit-helpers.js';
@@ -193,8 +216,9 @@ export async function agentRoutes(app: FastifyInstance) {
       startedAt: new Date(Date.now() - output.latencyMs).toISOString(),
       endedAt: new Date().toISOString(),
     };
-    if (!agentRuns.has(agent.id)) agentRuns.set(agent.id, []);
-    agentRuns.get(agent.id)!.push(run);
+    let runs = agentRuns.get(agent.id);
+    if (!runs) { runs = []; agentRuns.set(agent.id, runs); }
+    runs.push(run);
 
     writeAudit(ctx, 'agent.run', 'agent_run', runId, agent.businessId,
       { cached: output.cached, model: output.modelUsed, costCents: output.costCents, omega: output.omegaQuality });
