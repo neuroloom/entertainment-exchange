@@ -109,7 +109,7 @@ async function main() {
   console.log('\n── 4. Ledger ──');
 
   const acctsResp = await app.inject({ method: 'GET', url: `/api/v1/ledger/accounts?businessId=${businessId}`, headers: h() });
-  const accts = acctsResp.json().data as Array<{ id: string; code: string }>;
+  const accts = acctsResp.json().data as { id: string; code: string }[];
   const cashAcct = accts.find(a => a.code === '1000')!;
   const deferredAcct = accts.find(a => a.code === '2000')!;
   const revenueAcct = accts.find(a => a.code === '4000')!;

@@ -36,7 +36,7 @@ function sanitizeValue(value: unknown, context: string): unknown {
 
 // ── Layer 1: Regex injection pre-filter ────────────────────────────────────
 
-const INJECTION_PATTERNS: Array<{ name: string; re: RegExp; severity: 'block' | 'flag' }> = [
+const INJECTION_PATTERNS: { name: string; re: RegExp; severity: 'block' | 'flag' }[] = [
   // Prompt override / system prompt extraction
   { name: 'system_override', re: /(?:ignore|forget|disregard)\s+(?:all\s+)?(?:previous|above|prior)\s+(?:instructions?|prompts?|rules?|messages?)/i, severity: 'block' },
   { name: 'persona_hijack', re: /you\s+(?:are|now)\s+(?:now\s+)?(?:DAN|jailbroken|unfiltered|evil|malicious|a\s+different\s+model)/i, severity: 'block' },
@@ -51,8 +51,8 @@ const INJECTION_PATTERNS: Array<{ name: string; re: RegExp; severity: 'block' | 
   { name: 'recursive_attack', re: /(?:summarize|repeat|paraphrase|restate)\s+(?:the\s+)?(?:above|previous|prior|all)\s+(?:and\s+)?(?:then\s+)?(?:respond|answer|reply|output|act)/i, severity: 'flag' },
 ];
 
-function scanInjection(text: string): Array<{ name: string; severity: 'block' | 'flag' }> {
-  const hits: Array<{ name: string; severity: 'block' | 'flag' }> = [];
+function scanInjection(text: string): { name: string; severity: 'block' | 'flag' }[] {
+  const hits: { name: string; severity: 'block' | 'flag' }[] = [];
   for (const pat of INJECTION_PATTERNS) {
     if (pat.re.test(text)) {
       hits.push({ name: pat.name, severity: pat.severity });
@@ -115,7 +115,7 @@ export async function sanitizePlugin(app: FastifyInstance) {
     if (req.body) collectStrings(req.body, allStrings);
     if (req.query) collectStrings(req.query, allStrings);
 
-    const allHits: Array<{ name: string; severity: 'block' | 'flag' }> = [];
+    const allHits: { name: string; severity: 'block' | 'flag' }[] = [];
     for (const s of allStrings) {
       allHits.push(...scanInjection(s));
     }
