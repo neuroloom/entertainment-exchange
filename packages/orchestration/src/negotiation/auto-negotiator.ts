@@ -922,7 +922,7 @@ export class AutoNegotiator {
     };
 
     this.multiPartySessions.set(sessionId, session);
-    return JSON.parse(JSON.stringify(session));
+    return structuredClone(session);
   }
 
   runMultiPartyRound(
@@ -1017,7 +1017,7 @@ export class AutoNegotiator {
 
   getMultiPartySession(sessionId: string): MultiPartyNegotiation | undefined {
     const s = this.multiPartySessions.get(sessionId);
-    return s ? JSON.parse(JSON.stringify(s)) : undefined;
+    return s ? structuredClone(s) : undefined;
   }
 
   // ── Private: merge terms between buyer and seller preferences ────────────────
@@ -1075,7 +1075,7 @@ export class AutoNegotiator {
   }
 
   private cloneRound(r: NegotiationRound): NegotiationRound {
-    return JSON.parse(JSON.stringify(r));
+    return structuredClone(r);
   }
 }
 
