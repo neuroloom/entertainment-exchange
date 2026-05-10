@@ -100,8 +100,8 @@ export async function stripeRoutes(app: FastifyInstance) {
   });
 
   app.post('/stripe/webhook', async (req, reply) => {
-    const signature = req.headers['stripe-signature'] as string;
-    if (!signature) throw AppError.invalid('Missing stripe-signature header');
+    const signature = req.headers['stripe-signature'];
+    if (!signature || Array.isArray(signature)) throw AppError.invalid('Missing stripe-signature header');
 
     const payload = JSON.stringify(req.body);
     const valid = stripeService.verifyWebhookSignature(payload, signature);
@@ -109,8 +109,8 @@ export async function stripeRoutes(app: FastifyInstance) {
 
     // In production, process the event (payment_intent.succeeded, etc.)
     // and trigger downstream actions (confirm booking, send notifications)
-    const event = req.body as Record<string, unknown>;
-    const eventType = event.type as string;
+    const event = z.object({ type: z.string(), id: z.string().optional() }).passthrough().parse(req.body);
+    const eventType = event.type;
     req.log?.info({ eventType, eventId: event.id }, 'Stripe webhook received');
 
     reply.send({ received: true });

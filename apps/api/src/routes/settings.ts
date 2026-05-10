@@ -1,7 +1,30 @@
 // Tenant settings routes — per-tenant configuration management
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { AppError } from '../plugins/errorHandler.js';
 import { tenantSettings } from '../services/tenant-settings.service.js';
+
+const PatchSettingsSchema = z.object({
+  currency: z.string().optional(),
+  timezone: z.string().optional(),
+  locale: z.string().optional(),
+  features: z.object({
+    marketplace: z.boolean().optional(),
+    rights: z.boolean().optional(),
+    agents: z.boolean().optional(),
+    ledger: z.boolean().optional(),
+    webhooks: z.boolean().optional(),
+  }).optional(),
+  branding: z.object({
+    logoUrl: z.string().optional(),
+    primaryColor: z.string().optional(),
+  }).optional(),
+  limits: z.object({
+    maxBookingsPerMonth: z.number().int().min(0).optional(),
+    maxAgents: z.number().int().min(0).optional(),
+    maxListings: z.number().int().min(0).optional(),
+  }).optional(),
+}).strict();
 
 export async function settingsRoutes(app: FastifyInstance) {
   app.get('/settings', async (req, reply) => {
@@ -51,7 +74,7 @@ export async function settingsRoutes(app: FastifyInstance) {
     const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
 
-    const patch = req.body as Record<string, unknown>;
+    const patch = PatchSettingsSchema.parse(req.body);
     const updated = tenantSettings.upsert(ctx.tenantId, patch);
     reply.send({ data: updated });
   });

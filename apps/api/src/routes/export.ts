@@ -19,7 +19,7 @@ export async function exportRoutes(app: FastifyInstance) {
     const ctx = req.ctx;
     if (!ctx?.tenantId) throw AppError.tenantRequired();
 
-    const domain = params(req).domain as string;
+    const domain = params(req).domain;
     if (!VALID_DOMAINS.includes(domain)) {
       throw AppError.invalid(`Invalid domain. Must be one of: ${VALID_DOMAINS.join(', ')}`);
     }

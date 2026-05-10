@@ -49,6 +49,7 @@ const CreateRecurringSchema = z.object({
     addOns: z.array(z.string()).optional(),
     travelMiles: z.number().optional(),
     source: z.string().optional(),
+    eventDate: z.string().optional(),
   }),
 });
 
@@ -146,7 +147,7 @@ export async function recurringRoutes(app: FastifyInstance) {
     const tmpl = body.template;
 
     // First event date comes from the template if it has eventDate, or tomorrow
-    const startDate = (tmpl as Record<string, unknown>).eventDate as string ?? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const startDate = tmpl.eventDate ?? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
     const pattern: RecurrencePattern = {
       frequency: body.frequency,

@@ -1,5 +1,6 @@
 // Tenant migration routes — transfer data between tenants
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { AppError } from '../plugins/errorHandler.js';
 import { params } from '../plugins/requestContext.js';
 import { tenantMigration } from '../services/tenant-migration.service.js';
@@ -12,7 +13,10 @@ import type { Agent } from './agent.js';
 import { listings } from './marketplace.js';
 import type { Listing } from './marketplace.js';
 
-type CreateBody = { targetTenantId: string; domains: string[] };
+const CreateJobSchema = z.object({
+  targetTenantId: z.string(),
+  domains: z.array(z.string()).min(1),
+});
 
 export async function migrationRoutes(app: FastifyInstance) {
   app.post('/migration/jobs', {
@@ -28,7 +32,7 @@ export async function migrationRoutes(app: FastifyInstance) {
     },
   }, async (req, reply) => {
     const { ctx } = req;
-    const body = req.body as CreateBody;
+    const body = CreateJobSchema.parse(req.body);
     const job = tenantMigration.createJob(ctx.tenantId, body.targetTenantId, body.domains);
     reply.status(201).send({ data: job });
   });

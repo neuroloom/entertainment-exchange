@@ -780,6 +780,6 @@ export class AuditReportGenerator {
     // Use Node.js crypto module for reliable SHA-256
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { createHash } = require('node:crypto') as typeof import('node:crypto');
-    return createHash('sha256').update(input).digest('hex') as string;
+    return createHash('sha256').update(input).digest('hex');
   }
 }

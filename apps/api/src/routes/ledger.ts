@@ -517,5 +517,5 @@ function accountIdByCode(businessId: string, tenantId: string, code: string): st
   if (!found) {
     throw AppError.invalid(`Account code not found: ${code}. Ensure default accounts are seeded.`);
   }
-  return found.id as string;
+  return found.id;
 }
