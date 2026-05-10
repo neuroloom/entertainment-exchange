@@ -1,6 +1,6 @@
 // Plugins tests — errorHandler AppError factories, paginate(), rateLimitPlugin
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import Fastify from 'fastify';
+import Fastify, { type FastifyRequest, type FastifyReply } from 'fastify';
 import { AppError, errorHandlerPlugin } from '../plugins/errorHandler.js';
 import { paginate, paginatedResponse } from '../plugins/paginate.plugin.js';
 import type { Pagination } from '../plugins/paginate.plugin.js';
@@ -224,15 +224,15 @@ describe('rateLimitPlugin', () => {
     app = Fastify();
 
     // Register routes first, then the rate limit plugin hook
-    app.get('/limited', async (_req: any, reply: any) => {
+    app.get('/limited', async (_req: FastifyRequest, reply: FastifyReply) => {
       reply.send({ ok: true });
     });
 
-    app.get('/health', async (_req: any, reply: any) => {
+    app.get('/health', async (_req: FastifyRequest, reply: FastifyReply) => {
       reply.send({ status: 'ok' });
     });
 
-    app.get('/metrics', async (_req: any, reply: any) => {
+    app.get('/metrics', async (_req: FastifyRequest, reply: FastifyReply) => {
       reply.send({ up: true });
     });
 

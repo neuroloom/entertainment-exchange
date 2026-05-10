@@ -4,14 +4,16 @@ import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../server.js';
 
 // Mock the agent-executor to avoid calling real Anthropic SDK
-const mockExecuteAgentRun = vi.fn();
-const mockGetPipelineStats = vi.fn();
-const mockGetPipelineVGDO = vi.fn();
+const { mockExecuteAgentRun, mockGetPipelineStats, mockGetPipelineVGDO } = vi.hoisted(() => ({
+  mockExecuteAgentRun: vi.fn(),
+  mockGetPipelineStats: vi.fn(),
+  mockGetPipelineVGDO: vi.fn(),
+}));
 
 vi.mock('../services/agent-executor.js', () => ({
-  executeAgentRun: (...args: any[]) => mockExecuteAgentRun(...args),
-  getPipelineStats: (...args: any[]) => mockGetPipelineStats(...args),
-  getPipelineVGDO: (...args: any[]) => mockGetPipelineVGDO(...args),
+  executeAgentRun: mockExecuteAgentRun,
+  getPipelineStats: mockGetPipelineStats,
+  getPipelineVGDO: mockGetPipelineVGDO,
 }));
 
 const TENANT_A = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa';
