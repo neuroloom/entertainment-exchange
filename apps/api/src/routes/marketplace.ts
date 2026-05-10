@@ -260,8 +260,9 @@ export async function marketplaceRoutes(app: FastifyInstance) {
     };
 
     // Store in route-level deals map for backward compat
-    if (!deals.has(body.listingId)) deals.set(body.listingId, []);
-    deals.get(body.listingId)!.push(deal);
+    let existingDeals = deals.get(body.listingId);
+    if (!existingDeals) { existingDeals = []; deals.set(body.listingId, existingDeals); }
+    existingDeals.push(deal);
 
     // Also create in the DealRoomEngine for full state machine support
     try {

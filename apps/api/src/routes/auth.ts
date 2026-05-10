@@ -95,7 +95,8 @@ export async function authRoutes(app: FastifyInstance) {
     const passwordHash = await hashPassword(body.password);
     const tenantId = uuid();
     const tenantSlug = body.tenantName?.toLowerCase().replace(/\s+/g, '-') ?? `tenant-${uuid().slice(0, 8)}`;
-    tenants.set({ id: tenantId, name: body.tenantName ?? 'My Business', slug: tenantSlug, tenantId });
+    const tenantName = body.tenantName ?? 'My Business';
+    tenants.set({ id: tenantId, name: tenantName, slug: tenantSlug, tenantId });
 
     const userId = uuid();
     users.set({
@@ -115,7 +116,7 @@ export async function authRoutes(app: FastifyInstance) {
     reply.status(201).send({
       data: {
         user: { id: userId, email: body.email },
-        tenant: { id: tenantId, name: tenants.get(tenantId)!.name },
+        tenant: { id: tenantId, name: tenantName },
         membership: { role: 'tenant_admin' },
       },
     });
