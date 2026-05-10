@@ -10,8 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "pg": "^8.20.0",
-    "@entex/shared": "*"
+    "pg": "^8.20.0"
   },
   "devDependencies": {
     "@types/pg": "^8.11.0",
