@@ -53,7 +53,7 @@ export const errorCategorizer = {
       byKey.set(key, s);
     }
     return [...byKey.entries()]
-      .map(([key, s]) => { const [code, ...ep] = key.split(' '); return { endpoint: ep.join(' '), statusCode: parseInt(code), count: s.count, lastSeen: s.lastSeen }; })
+      .map(([key, s]) => { const [code, ...ep] = key.split(' '); return { endpoint: ep.join(' '), statusCode: parseInt(code, 10), count: s.count, lastSeen: s.lastSeen }; })
       .sort((a, b) => b.count - a.count).slice(0, limit);
   },
 };
