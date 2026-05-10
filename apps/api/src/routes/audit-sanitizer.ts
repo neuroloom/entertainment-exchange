@@ -5,8 +5,6 @@ import { auditSanitizer } from '../services/audit-sanitizer.service.js';
 import { sharedAudit } from '../services/audit-helpers.js';
 import { serializeRows, getExportContentType } from '../services/export.service.js';
 
-
-
 export async function auditSanitizerRoutes(app: FastifyInstance) {
   app.get('/audit/sanitize/rules', async (_req, reply) => {
     reply.send({ data: auditSanitizer.getRules() });
