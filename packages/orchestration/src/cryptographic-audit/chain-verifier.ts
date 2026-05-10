@@ -958,7 +958,7 @@ export class ChainVerifier {
    */
   generateAuditProof(entryId: string): {
     entry: HashChainEntry | null;
-    merkleProof: MerkleProof;
+    merkleProof: MerkleProof | null;
     chainPosition: { prevHash: string; nextHash: string | null };
     verified: boolean;
   } {
@@ -969,7 +969,7 @@ export class ChainVerifier {
     }
 
     if (!entry) {
-      return { entry: null, merkleProof: {} as MerkleProof, chainPosition: { prevHash: '', nextHash: null }, verified: false };
+      return { entry: null, merkleProof: null, chainPosition: { prevHash: '', nextHash: null }, verified: false };
     }
 
     const merkleProof = this.generateMerkleProof(entryId);
