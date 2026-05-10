@@ -233,7 +233,7 @@ export class ReputationEngine {
     vertical?: string,
     allBusinessVerticals?: Array<{ businessId: string; vertical: string }>,
     allAuditEvents?: ReputationAuditEvent[],
-    allBusinesses?: Array<{ businessId: string }>,
+    _allBusinesses?: Array<{ businessId: string }>,
   ): IndustryBenchmark[] {
     if (!allAuditEvents || allAuditEvents.length === 0) return [];
     if (!allBusinessVerticals || allBusinessVerticals.length === 0) return [];
@@ -719,7 +719,7 @@ export class ReputationEngine {
    * This is the "FOMO hook" for the network effect flywheel.
    */
   getPeerComparison(
-    businessId: string,
+    _businessId: string,
     score: ReputationScore,
     benchmarks: IndustryBenchmark[],
     businessVertical?: string,

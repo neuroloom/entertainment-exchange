@@ -106,7 +106,7 @@ export class DynamicPricingEngine {
    */
   recommendPrice(
     resourceId: string,
-    resourceType: string,
+    _resourceType: string,
     historicalDeals: HistoricalDeal[],
     currentPriceCents: number = 0,
   ): PriceRecommendation {
@@ -249,7 +249,7 @@ export class DynamicPricingEngine {
    * @param horizonDays - Number of days to forecast (default 30).
    */
   forecastDemand(
-    vertical: string,
+    _vertical: string,
     historicalBookings: Array<{ date: string; count: number }>,
     horizonDays: number = 30,
   ): DemandForecast[] {

@@ -22,7 +22,7 @@ export interface BulkUserResult {
 const results: BulkUserResult[] = [];
 
 export const bulkUsers = {
-  execute(tenantId: string, ops: BulkUserOp[], actorId: string): BulkUserResult {
+  execute(_tenantId: string, ops: BulkUserOp[], _actorId: string): BulkUserResult {
     const result: BulkUserResult = {
       total: ops.length, created: 0, updated: 0, deleted: 0, invited: 0, failed: 0,
       errors: [], completedAt: new Date().toISOString(),
@@ -52,7 +52,7 @@ export const bulkUsers = {
     return result;
   },
 
-  history(tenantId: string): BulkUserResult[] {
+  history(_tenantId: string): BulkUserResult[] {
     return results.slice(-50);
   },
 

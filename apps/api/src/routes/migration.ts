@@ -50,7 +50,7 @@ export async function migrationRoutes(app: FastifyInstance) {
       else if (d === 'listings') sourceData.listings = listings.all(ctx.tenantId);
     }
 
-    const result = await tenantMigration.execute(job.id, sourceData, (domain, records, targetTenantId) => {
+    const result = await tenantMigration.execute(job.id, sourceData, (domain, records, _targetTenantId) => {
       switch (domain) {
         case 'businesses': for (const r of records) businesses.set(r as unknown as Business); break;
         case 'bookings': for (const r of records) bookings.set(r as unknown as Booking); break;

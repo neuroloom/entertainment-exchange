@@ -170,7 +170,7 @@ export class EmbeddingIndexer {
    * This builds transactional & co-occurrence edges in the similarity graph —
    * the network effect where more deals = better recommendations.
    */
-  recordTransaction(entityIds: string[], tenantId: string): void {
+  recordTransaction(entityIds: string[], _tenantId: string): void {
     this.totalTransactions++;
 
     for (const id of entityIds) {

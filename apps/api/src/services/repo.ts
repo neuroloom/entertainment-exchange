@@ -199,7 +199,7 @@ export class MemoryStore<T extends StoreEntity = any> {
       const placeholders = vals.map((_, i) => `$${i + 1}`);
       const start = Date.now();
       await pool.query(
-        `/* trace_id: ${traceId} */ INSERT INTO ${this.tableName} (${keys.join(', ')}) VALUES (${placeholders.join(', ')}) ON CONFLICT (id) DO UPDATE SET ${keys.filter(k => k !== 'id').map((k, i) => `${k} = EXCLUDED.${k}`).join(', ')}`,
+        `/* trace_id: ${traceId} */ INSERT INTO ${this.tableName} (${keys.join(', ')}) VALUES (${placeholders.join(', ')}) ON CONFLICT (id) DO UPDATE SET ${keys.filter(k => k !== 'id').map((k, _i) => `${k} = EXCLUDED.${k}`).join(', ')}`,
         vals,
       );
       const duration = Date.now() - start;

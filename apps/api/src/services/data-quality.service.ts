@@ -19,7 +19,7 @@ const checks: QualityCheck[] = [
 ];
 
 export const dataQuality = {
-  score(tenantId: string, domain: string, records: Record<string, unknown>[]): QualityScore {
+  score(_tenantId: string, domain: string, records: Record<string, unknown>[]): QualityScore {
     const check = checks.find(c => c.domain === domain);
     if (!check || records.length === 0) {
       return { domain, totalRecords: records.length, completenessPct: 100, requiredFieldsPresent: 0, requiredFieldsTotal: 0, staleRecords: 0, orphanedRecords: 0, overallScore: records.length === 0 ? 100 : 50 };

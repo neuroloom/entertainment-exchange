@@ -209,7 +209,7 @@ function createStripeAdapter(): ProtocolAdapter {
       return { paymentId, verified: true, status: 'processing', settledAt: null };
     },
 
-    async refundPayment(paymentId: string, amountCents: number): Promise<PaymentResult> {
+    async refundPayment(_paymentId: string, amountCents: number): Promise<PaymentResult> {
       return {
         paymentId: makePaymentId('stripe_refund'),
         protocolId: 'stripe',
@@ -254,7 +254,7 @@ function createACHAdapter(): ProtocolAdapter {
       return { paymentId, verified: true, status: 'processing', settledAt: null };
     },
 
-    async refundPayment(paymentId: string, amountCents: number): Promise<PaymentResult> {
+    async refundPayment(_paymentId: string, amountCents: number): Promise<PaymentResult> {
       return {
         paymentId: makePaymentId('ach_refund'),
         protocolId: 'ach',
@@ -300,7 +300,7 @@ function createUSDCAdapter(): ProtocolAdapter {
       return { paymentId, verified: true, status: 'processing', settledAt: null };
     },
 
-    async refundPayment(paymentId: string, amountCents: number): Promise<PaymentResult> {
+    async refundPayment(_paymentId: string, amountCents: number): Promise<PaymentResult> {
       return {
         paymentId: makePaymentId('usdc_refund'),
         protocolId: 'usdc',

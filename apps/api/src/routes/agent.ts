@@ -226,11 +226,11 @@ export async function agentRoutes(app: FastifyInstance) {
   });
 
   // OMEGA pipeline stats
-  app.get('/pipeline/stats', { preHandler: withAuth() }, async (req, reply) => {
+  app.get('/pipeline/stats', { preHandler: withAuth() }, async (_req, reply) => {
     reply.send({ data: getPipelineStats() });
   });
 
-  app.get('/pipeline/vgdo', { preHandler: withAuth() }, async (req, reply) => {
+  app.get('/pipeline/vgdo', { preHandler: withAuth() }, async (_req, reply) => {
     reply.send({ data: getPipelineVGDO() });
   });
 

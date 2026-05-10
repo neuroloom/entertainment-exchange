@@ -10,7 +10,7 @@ export interface SimulationResult {
 }
 
 export const rateLimitSimulator = {
-  simulate(tenantId: string, rpm: number, limitRpm: number, concurrency: number): SimulationResult {
+  simulate(_tenantId: string, rpm: number, limitRpm: number, concurrency: number): SimulationResult {
     const utilizationPct = Math.round(rpm / limitRpm * 100);
     const wouldBeLimited = rpm >= limitRpm;
     const headroom = limitRpm - rpm;
@@ -28,7 +28,7 @@ export const rateLimitSimulator = {
     };
   },
 
-  whatIf(tenantId: string, currentRpm: number, growthPct: number, limitRpm: number): Array<{ daysOut: number; projectedRpm: number; wouldExceed: boolean }> {
+  whatIf(_tenantId: string, currentRpm: number, growthPct: number, limitRpm: number): Array<{ daysOut: number; projectedRpm: number; wouldExceed: boolean }> {
     const projections: Array<{ daysOut: number; projectedRpm: number; wouldExceed: boolean }> = [];
     const growthFactor = 1 + growthPct / 100;
 
@@ -40,7 +40,7 @@ export const rateLimitSimulator = {
     return projections;
   },
 
-  capacityPlanning(tenantId: string, currentRpm: number, growthPct: number, limitRpm: number): { daysUntilExhaustion: number | null; recommendedLimit: number } {
+  capacityPlanning(_tenantId: string, currentRpm: number, growthPct: number, limitRpm: number): { daysUntilExhaustion: number | null; recommendedLimit: number } {
     const growthFactor = 1 + growthPct / 100;
 
     let daysUntilExhaustion: number | null = null;

@@ -872,7 +872,7 @@ export class TalentEngine {
   private estimateExpectedDraw(
     artist: ArtistProfile,
     venue: VenueProfile,
-    artistBookings: BookingRecord[],
+    _artistBookings: BookingRecord[],
   ): number {
     const typicalDraw = this.estimateTypicalDraw(artist);
 

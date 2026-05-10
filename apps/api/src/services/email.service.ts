@@ -33,7 +33,7 @@ export const emailService = {
     if (!transporter) {
       // Fallback: log to console when SMTP is not configured
       _provider = {
-        async send(to: string, subject: string, htmlBody: string) {
+        async send(to: string, subject: string, _htmlBody: string) {
           const from = process.env.SMTP_FROM ?? 'noreply@entex.com';
           console.log(`[email] To: ${to} | Subject: ${subject} | From: ${from}`);
           return { success: true };
@@ -43,7 +43,7 @@ export const emailService = {
     }
 
     _provider = {
-      async send(to: string, subject: string, htmlBody: string) {
+      async send(to: string, subject: string, _htmlBody: string) {
         try {
           const from = process.env.SMTP_FROM ?? 'noreply@entex.com';
           await transporter.sendMail({ from, to, subject, html: htmlBody });

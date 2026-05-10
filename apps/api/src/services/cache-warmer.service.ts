@@ -30,7 +30,7 @@ export const cacheWarmer = {
     if (r) r.lastWarmedAt = new Date().toISOString();
   },
 
-  getRecommendedRules(tenantId: string): Array<{ path: string; reason: string; suggestedTtl: number; suggestedPriority: number }> {
+  getRecommendedRules(_tenantId: string): Array<{ path: string; reason: string; suggestedTtl: number; suggestedPriority: number }> {
     return [
       { path: '/api/v1/dashboard', reason: 'Most-accessed overview', suggestedTtl: 30_000, suggestedPriority: 10 },
       { path: '/api/v1/activity', reason: 'Frequently polled feed', suggestedTtl: 15_000, suggestedPriority: 8 },

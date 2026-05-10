@@ -40,7 +40,7 @@ export const RULE_DUAL_ENTRY_BALANCE: ComplianceRule = {
   description: 'Every journal entry must have equal total debits and credits.',
   regulation: 'GAAP',
   severity: 'violation',
-  check(events: AuditEvent[], journals: JournalLine[]): ComplianceCheckResult {
+  check(_events: AuditEvent[], journals: JournalLine[]): ComplianceCheckResult {
     // Group lines by journalId
     const byJournal = new Map<string, JournalLine[]>();
     for (const line of journals) {
@@ -175,7 +175,7 @@ export const RULE_IDEMPOTENCY: ComplianceRule = {
   description: 'No duplicate journal entries with the same reference, account, direction, and amount.',
   regulation: 'GAAP',
   severity: 'violation',
-  check(events: AuditEvent[], journals: JournalLine[]): ComplianceCheckResult {
+  check(_events: AuditEvent[], journals: JournalLine[]): ComplianceCheckResult {
     const seen = new Set<string>();
     const duplicates: string[] = [];
 
@@ -273,7 +273,7 @@ export const RULE_RIGHTS_TRANSFER: ComplianceRule = {
   description: 'Rights passport transfers must have a valid, sequential chain-of-title.',
   regulation: 'GAAP',
   severity: 'violation',
-  check(events: AuditEvent[], journals: JournalLine[]): ComplianceCheckResult {
+  check(events: AuditEvent[], _journals: JournalLine[]): ComplianceCheckResult {
     // Extract rights transfer events from audit log
     const transferEvents = events.filter(
       e => e.eventType === 'state_change' && e.action === 'rights_transfer',

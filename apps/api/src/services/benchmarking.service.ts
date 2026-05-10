@@ -10,7 +10,7 @@ export interface Benchmark {
 }
 
 export const benchmarking = {
-  compare(tenantId: string, metrics: Record<string, number>, allTenantMetrics: Array<{ tenantId: string; metrics: Record<string, number> }>): Benchmark[] {
+  compare(_tenantId: string, metrics: Record<string, number>, allTenantMetrics: Array<{ tenantId: string; metrics: Record<string, number> }>): Benchmark[] {
     const results: Benchmark[] = [];
 
     for (const [metric, tenantValue] of Object.entries(metrics)) {
@@ -40,7 +40,7 @@ export const benchmarking = {
     return results;
   },
 
-  generateSummary(tenantId: string, benchmarks: Benchmark[]): { strengths: string[]; opportunities: string[] } {
+  generateSummary(_tenantId: string, benchmarks: Benchmark[]): { strengths: string[]; opportunities: string[] } {
     const strengths = benchmarks.filter(b => b.trend === 'above_avg').map(b => `${b.metric}: top ${100 - b.percentile}%`);
     const opportunities = benchmarks.filter(b => b.trend === 'below_avg').map(b => `${b.metric}: bottom ${b.percentile}%`);
     return { strengths, opportunities };

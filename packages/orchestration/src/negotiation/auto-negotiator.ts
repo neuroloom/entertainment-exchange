@@ -625,7 +625,7 @@ export class AutoNegotiator {
 
   calculateBATNA(
     listingId: string,
-    buyerBusinessId: string,
+    _buyerBusinessId: string,
     opts?: {
       listingPriceCents?: number;
       sellerCostCents?: number;

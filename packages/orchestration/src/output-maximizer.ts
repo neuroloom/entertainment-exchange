@@ -168,7 +168,7 @@ export class OutputMaximizer {
   private async processBatch(items: InferenceRequest[]): Promise<InferenceResponse[]> {
     // True parallel execution — all items in batch fire simultaneously
     return Promise.all(items.map(req =>
-      this.processItem(req).catch(err => {
+      this.processItem(req).catch(_err => {
         this.metrics.increment('error');
         return {
           model: req.model, response: '', promptTokens: 0, completionTokens: 0,

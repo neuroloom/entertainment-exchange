@@ -45,9 +45,9 @@ export async function dataRetentionRoutes(app: FastifyInstance) {
     const ctx = req.ctx;
     // Mock stores for enforcement — in production, wire real store deleteOlderThan
     const mockStores = {
-      bookings: { deleteOlderThan: (days: number) => 0 },
-      audit_events: { deleteOlderThan: (days: number) => 0 },
-      notifications: { deleteOlderThan: (days: number) => 0 },
+      bookings: { deleteOlderThan: (_days: number) => 0 },
+      audit_events: { deleteOlderThan: (_days: number) => 0 },
+      notifications: { deleteOlderThan: (_days: number) => 0 },
     };
     const results = dataRetention.enforce(ctx.tenantId, mockStores);
     reply.send({ data: { enforced: true, results } });
